@@ -15,11 +15,22 @@ alert fatigue, so the aim is fewer, better alerts.
   rebase, reset, stash, checkout/switch branches, create/delete branches or tags, amend, or
   edit git config unless a teammate asks for that specific action in the current conversation.
   Permission for one action doesn't carry over to the next. Read-only commands
-  (`git status`, `git diff`, `git log`, `git show`, `git blame`) are always fine.
+  (`git status`, `git diff`, `git log`, `git show`, `git blame`, `git fetch`) are always fine.
 - Work in small steps and show output before moving on.
-- Base FHIR parsing on a real Synthea bundle in `data/raw/`, not on assumptions about structure.
-- Never commit `data/raw/`.
+- Never commit generated data (`server/data/`) or the Synthea jar cache (`server/.cache/`).
 - Ask before deciding anything listed under **Open decisions**.
+
+## Repo layout
+
+```
+apps/nurse-web/          Vite + React nurse dashboard (TS)
+apps/patient-desktop/    Electron + React patient app (TS)
+packages/shared/         @repo/shared - TS types shared by both apps (VitalsReading, ...)
+server/                  all backend Python (standard library only, Python 3.9+)
+  Synthea_Gen/synthea.py   runs Synthea -> server/data/synthea/{csv,fhir}/ (gitignored)
+  sim/                     vitals simulator: loads Synthea CSV, streams readings, HTTP/SSE server
+  news2/scoring.py         NEWS2 scoring + alert persistence rule
+```
 
 ## Stack
 
@@ -27,135 +38,123 @@ alert fatigue, so the aim is fewer, better alerts.
 |---|---|
 | Frontends | TypeScript: `apps/nurse-web` (Vite + React), `apps/patient-desktop` (Electron + React) |
 | Shared TS types | `packages/shared` (`@repo/shared`) |
-| Backend | Python + FastAPI (`services/api/`), managed with `uv` and `pyproject.toml` |
-| Severity scoring | NEWS2, deterministic and authoritative |
-| ML layer | scikit-learn, running **locally** (no data leaves the machine) |
-| Data model | HL7 FHIR R4 (`fhir.resources` in Python, `@types/fhir` in TS) |
+| Backend | Python, standard library only, in `server/`. FastAPI planned but not set up yet |
+| Severity scoring | NEWS2, a plain local algorithm (no ML model) |
+| Data model | HL7 FHIR R4 concepts and LOINC codes; readings are plain camelCase JSON |
 | Mock patients | Synthea (Java CLI, run once to generate data) |
 | JS package manager | pnpm (version pinned in root `package.json`) |
 
-The Python backend is **not** part of the pnpm workspace. The TS apps talk to it over HTTP/WebSocket.
-To keep the two languages in sync, generate TS types from FastAPI's OpenAPI schema
-(e.g. `openapi-typescript`) rather than hand-writing duplicate types.
+The Python backend is **not** part of the pnpm workspace; `package.json` just has scripts that call
+`python3`. Reading dicts use camelCase keys that match `VitalsReading` in `packages/shared`, so they
+go to the apps as JSON unchanged. Keep the two in sync by hand when fields change.
 
 ## Prerequisites
 
 - Node + pnpm: everyone. pnpm is auto-downloaded via `devEngines`.
-- Python 3.12+ and [`uv`](https://docs.astral.sh/uv/): everyone working on the backend.
-  `uv sync` in `services/api/` installs dependencies from `pyproject.toml` / `uv.lock`.
-- Java 17 (LTS): **only** to regenerate Synthea data. `data/clean/` is committed, so most
-  people never need Java. Mac: `brew install openjdk@17`.
+- Python 3.9+: everyone working on the backend. No packages to install.
+- Java 17+: **only** to regenerate Synthea data. Mac: `brew install openjdk@17`.
 
 ## Commands
 
 ```sh
-pnpm dev           # nurse web app + patient desktop app
-pnpm dev:nurse     # nurse web app only
-pnpm dev:patient   # Electron app only
+pnpm dev             # nurse web app + patient desktop app
+pnpm dev:nurse       # nurse web app only
+pnpm dev:patient     # Electron app only
 pnpm typecheck
 pnpm lint
+
+pnpm data:synthea    # generate patients -> server/data/synthea/ (needs Java)
+pnpm sim:demo        # fast-forward 3 h and print a ward table
+pnpm sim:serve       # HTTP + Server-Sent Events on http://127.0.0.1:8765
+pnpm test:sim        # simulator + data shape tests
 ```
 
-Backend commands (to be set up):
+## Privacy rules
 
-```sh
-cd services/api
-uv sync
-uv run fastapi dev app/main.py
-uv run pytest
+- Synthea data is synthetic. The simulator currently loads Synthea names and birthdates as-is;
+  the team has accepted that for mock data.
+- Key everything on patient IDs, never on bed/room number. Room is a display label only.
+- If an external LLM is ever called, it only receives pseudonymized clinical data (no names,
+  addresses, phone numbers, identifiers, exact birthdates, or free-text notes).
+
+## Data flow
+
+1. **generate**: `server/Synthea_Gen/synthea.py` runs Synthea with a fixed seed (1984), living
+   patients only, and writes CSV + FHIR to `server/data/synthea/`.
+2. **simulate**: `server/sim/vitals_sim.py` loads patients from the Synthea **CSV** (active
+   conditions, latest vitals), derives a baseline per patient, and emits one reading per patient
+   per tick. Scenarios (sepsis, hypoxia, ...) push vitals away from baseline. Deterministic given a seed.
+3. **score**: `server/news2/scoring.py` scores each reading and decides the alert tier.
+
+Reading shape (one per patient per tick):
+
+```json
+{ "patientId": "...", "recordedAt": "2026-01-01T08:00:05.000Z",
+  "heartRateBpm": 78, "systolicMmHg": 136, "diastolicMmHg": 80, "spo2Percent": 94,
+  "temperatureC": 36.6, "respiratoryRate": 16, "onOxygen": false, "consciousness": "A" }
 ```
-
-## Privacy rules (non-negotiable)
-
-- Nothing past the **transform** step may contain names, addresses, telecom, identifiers
-  (MRN/SSN etc.), exact birthDate, or free-text notes.
-- Store age as an **age band** (e.g. `"70-79"`), not a birthdate.
-- Key everything on random **pseudonymous IDs** (`Patient.id` / `Encounter.id`).
-- **A bed number is a display label only, never a key.** Model beds as FHIR `Location` resources
-  linked from `Encounter.location`. Patients transfer, and beds get reused.
-- The ML model runs locally. If an external LLM is ever called, it only receives
-  pseudonymized clinical data.
-- Known violation to fix: `packages/shared/src/index.ts` `Patient` currently has
-  `firstName`/`lastName` and uses `room` as an attribute. Replace it with pseudonymous ID +
-  age band + bed display label.
-
-## Pipeline (separate, independent steps)
-
-Keep the steps independent so a simulator bug never requires regenerating data.
-
-1. **generate**: run Synthea and write raw output to `data/raw/` (gitignored).
-2. **transform**: read raw bundles and write one small clean JSON per patient to `data/clean/` (committed).
-   - Skip `hospitalInformation*.json` and `practitionerInformation*.json`.
-   - Drop deceased patients (`Patient.deceasedDateTime` / `deceasedBoolean`).
-   - Scrub identifying fields (see Privacy rules).
-   - Keep: Patient (scrubbed), active Conditions, active MedicationRequests, recent Observations.
-3. **simulate**: load clean patients, create an `in-progress` inpatient `Encounter`
-   (class `IMP`) and a bed `Location` for each, then emit vital-sign `Observation`s on a timer
-   (e.g. 1 tick every 2-5 s real time = 15 min hospital time), driven by per-patient scenarios.
 
 ## Synthea
 
-- Use the prebuilt `synthea-with-dependencies.jar` (keep it in a gitignored `tools/` dir).
-- Example: `java -jar synthea-with-dependencies.jar -s 42 -p 10 -a 60-90 --exporter.years_of_history=5 Massachusetts`
-  - `-s` is the seed. Keep it fixed so the whole team gets identical data. `-p` is population size and `-a` is the age range.
-- Output goes to `output/fhir/`, one transaction Bundle per patient. Bundles are large (often MBs),
-  so start with small populations.
-- **Gotcha:** references inside bundles are usually `urn:uuid:...` matching each entry's
-  `fullUrl`, not `Patient/<id>`. Build a `fullUrl -> resource` map to resolve them.
+- `pnpm data:synthea` downloads the jar once to `server/.cache/synthea/` and runs it.
+  Options: `-p` population, `-s` seed, `-a` age range. Keep the seed fixed so the team gets
+  identical data.
+- Bundles are large (often MBs), so start with small populations.
+- **Gotcha (FHIR output):** references inside bundles are usually `urn:uuid:...` matching each
+  entry's `fullUrl`, not `Patient/<id>`. Build a `fullUrl -> resource` map to resolve them.
 
 ## Vitals and codes
 
-Verify these LOINC codes against a real Synthea bundle (grep the raw output) and use whatever
-Synthea actually emits:
+LOINC codes the loader reads from Synthea. Identify vitals by code, never by display text.
 
 - Heart rate `8867-4`
 - Respiratory rate `9279-1`
-- Blood pressure panel `85354-9`, with components systolic `8480-6` and diastolic `8462-6`
+- Systolic BP `8480-6`, diastolic BP `8462-4`
 - Body temperature `8310-5`
-- Oxygen saturation: more than one code exists (e.g. `59408-5`, `2708-6`). Confirm which one Synthea uses.
+- Oxygen saturation `2708-6` and `59408-5` (both are used)
 
-Observation essentials: `status`, `category` = `vital-signs`, `code` (LOINC), `subject`,
-`encounter`, `effectiveDateTime` (current sim time), and `valueQuantity` (UCUM units).
-Identify vitals by LOINC code, never by display text.
+## Alerting (NEWS2)
 
-## Alerting
+Implemented in `server/news2/scoring.py`. NEWS2 tests are owned by a different teammate.
 
-- **NEWS2 is the deterministic core and always authoritative.** It needs inputs that Synthea
-  doesn't provide, so the simulator must emit them too:
-  - level of consciousness (ACVPU, where new confusion scores 3)
-  - supplemental oxygen (yes/no, scores 2)
-  - SpO2 Scale 1 vs Scale 2 (Scale 2 only for confirmed hypercapnic respiratory failure,
-    e.g. some COPD patients; derive it from Conditions)
-- **Tiers** map to NEWS2 clinical response bands:
-  - **watch**: aggregate 1-4
-  - **check soon**: aggregate 5-6, *or* a single parameter scoring 3
-  - **go now**: aggregate 7+
-- **ML layer (scikit-learn, local).** It sits on top of NEWS2 and can never silently lower a
-  NEWS2 "go now". Candidate uses:
-  - artifact detection (e.g. an IsolationForest or rules + features flagging a physiologically
-    implausible single reading like the loose-probe SpO2 dip)
-  - trend detection (sustained drift across ticks vs. one-off noise)
-  - Synthea data has no real deterioration labels, so any trained model learns from our own
-    scenario-generated data. Be upfront about that in the demo.
-- **Context:** use Conditions/Meds, e.g. beta blockers blunt the HR response.
-- **Explanation:** every alert carries a plain-language reason (which parameters, what trend).
-- Consider writing alerts back as FHIR `Flag` or `Communication` resources.
+- **Scoring:** each of the 7 inputs (respiratory rate, SpO2, air or oxygen, systolic BP, pulse,
+  consciousness, temperature) is scored 0-3 from the RCP 2017 chart and summed (0-20).
+  Bands are "value <= upper edge", so in-between decimals (38.05 °C) still score.
+- **SpO2 scale:** Scale 2 is used automatically for patients whose conditions indicate
+  hypercapnic respiratory failure risk (COPD, emphysema, ...). Asthma stays on Scale 1.
+- **Risk and tiers:**
+
+  | NEWS2 | Risk | Tier |
+  |---|---|---|
+  | total 0 | low | none |
+  | total 1-4 | low | watch |
+  | any single input scores 3 | low-medium | check soon |
+  | total 5-6 | medium | check soon |
+  | total 7+ | high | go now |
+
+- **Persistence rule (false-alarm suppression):** `News2Monitor` only escalates once a tier has
+  held for 2 consecutive readings. One bad reading is marked `suppressed` instead of alerting.
+  De-escalation is immediate. This sits on top of NEWS2; the raw score is always reported too.
+- **Missing inputs:** a reading without all 7 inputs raises `ValueError`. The data shape tests
+  guarantee the simulator always sends them.
+- **Explanation:** every result carries `reasons` (e.g. `"Respiratory rate 23/min (+2)"`) and
+  the NEWS2 recommended `response`.
+- Later: use Conditions/Meds for context (e.g. beta blockers blunt HR); write alerts back as
+  FHIR `Flag` or `Communication` resources.
 
 ## Scenarios
 
-Each patient has a stable baseline plus small random noise, and optionally a scripted
-deterioration curve over N simulated hours. **They must be deterministic given a seed** so demo
-runs are reproducible.
+Each patient has a stable baseline plus noise; scenarios have an onset -> hold -> recovery curve.
+**Deterministic given a seed** so demo runs are reproducible.
 
 - **stable**: most patients
-- **early sepsis**: HR, RR and temp rise; SpO2 drifts down; SBP falls late; possibly new confusion
-- **false alarm**: one implausible SpO2 reading, immediately back to normal
+- **sepsis**: HR, RR and temp rise; SBP falls; SpO2 drifts down; new confusion at high intensity
+- also: hypoxia, fever, tachycardia, hypotension, hypertensive crisis
+- **false alarm**: one implausible SpO2 reading, immediately back to normal. **Not in the
+  simulator yet**; needed to demo the persistence rule.
 
 ## Open decisions (ask before building)
 
-- Where the transform + simulate steps live: Python (`services/api`, alongside scoring) vs. TS.
-  Python is currently assumed.
-- Transport: the backend reads from a **HAPI FHIR server** (Docker `hapiproject/hapi`, more
-  realistic) vs. a **direct event stream** (FastAPI WebSocket, faster to build).
-- Exactly what the scikit-learn model does (artifact detection, trend, or both).
+- FastAPI backend vs. extending the simulator's built-in HTTP/SSE server.
+- How the apps consume alerts (same SSE stream with scores attached, or a separate endpoint).
 - Stretch: replay one patient from the MIMIC-IV demo on FHIR (PhysioNet) as a "real data" showcase.
