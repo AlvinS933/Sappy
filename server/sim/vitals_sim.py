@@ -108,7 +108,7 @@ def load_synthea_patients(csv_dir: Path | str = DEFAULT_CSV_DIR) -> List[SimPati
     """Load living patients from Synthea CSV output, with active conditions and latest vitals."""
     csv_dir = Path(csv_dir)
     if not (csv_dir / "patients.csv").exists():
-        raise FileNotFoundError(f"{csv_dir}/patients.csv not found - run scripts/synthea.py first")
+        raise FileNotFoundError(f"{csv_dir}/patients.csv not found - run server/Synthea_Gen/synthea.py first")
 
     latest: Dict[str, Dict[str, tuple]] = {}
     for o in _read_csv(csv_dir / "observations.csv"):

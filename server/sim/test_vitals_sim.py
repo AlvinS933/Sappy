@@ -1,4 +1,4 @@
-"""Run: python3 -m unittest discover sim -v"""
+"""Run: python3 -m unittest discover server/sim -v"""
 
 from __future__ import annotations
 
@@ -140,7 +140,7 @@ class SimulatorTests(unittest.TestCase):
             sim.trigger("healthy", "zombie")
 
 
-@unittest.skipUnless((DEFAULT_CSV_DIR / "patients.csv").exists(), "no Synthea data - run scripts/synthea.py")
+@unittest.skipUnless((DEFAULT_CSV_DIR / "patients.csv").exists(), "no Synthea data - run server/Synthea_Gen/synthea.py")
 class SyntheaLoaderTests(unittest.TestCase):
     def test_loads_patients(self):
         patients = load_synthea_patients()
@@ -151,7 +151,7 @@ class SyntheaLoaderTests(unittest.TestCase):
             self.assertFalse(any("(finding)" in c for c in p.conditions))
 
 
-@unittest.skipUnless((DEFAULT_CSV_DIR / "patients.csv").exists(), "no Synthea data - run scripts/synthea.py")
+@unittest.skipUnless((DEFAULT_CSV_DIR / "patients.csv").exists(), "no Synthea data - run server/Synthea_Gen/synthea.py")
 class ServerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

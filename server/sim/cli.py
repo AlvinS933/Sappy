@@ -1,8 +1,8 @@
 """Command-line entry point for the vitals simulator.
 
-    python3 sim/cli.py demo                      # fast-forward 3 h, print the ward every 15 min
-    python3 sim/cli.py stream --speed 30         # JSON lines on stdout (one batch per line)
-    python3 sim/cli.py serve --speed 30          # HTTP + Server-Sent Events on http://127.0.0.1:8765
+    python3 server/sim/cli.py demo                      # fast-forward 3 h, print the ward every 15 min
+    python3 server/sim/cli.py stream --speed 30         # JSON lines on stdout (one batch per line)
+    python3 server/sim/cli.py serve --speed 30          # HTTP + Server-Sent Events on http://127.0.0.1:8765
 
 Server endpoints (CORS open, for local dev only):
     GET  /patients                     patient list (+ baseline, active events)

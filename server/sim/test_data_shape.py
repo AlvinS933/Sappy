@@ -1,6 +1,6 @@
 """Data shape + loader + simulator function tests.
 
-Run: python3 -m unittest discover sim -v   (or: pnpm test:sim)
+Run: python3 -m unittest discover server/sim -v   (or: pnpm test:sim)
 
 Sections:
   1. ReadingShapeTests   - each reading has the fields/types NEWS2 scoring will consume
