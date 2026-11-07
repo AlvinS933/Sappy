@@ -25,24 +25,37 @@ alert fatigue, so the aim is fewer, better alerts.
 
 | Area | Choice |
 |---|---|
-| Frontends | TypeScript: `apps/nurse-web` (Vite + React), `apps/patient-desktop` (Electron + React) |
-| Shared TS types | `packages/shared` (`@repo/shared`) |
-| Backend | Python + FastAPI (`services/api/`), managed with `uv` and `pyproject.toml` |
+| Frontends | TypeScript: `apps/nurse-web` (Vite + React, hosted on **Vercel**), `apps/patient-desktop` (Electron + React, runs locally) |
+| Shared TS types | `packages/shared` (`@repo/shared`), incl. Supabase row types + mappers |
+| Backend | Python services on **Render**: `sim/` (simulator) now, NEWS2 agent next. Deps in `requirements.txt` |
+| Database / realtime / auth | **Supabase** (Postgres + Realtime + Auth). Schema: `supabase/migrations/` |
 | Severity scoring | NEWS2, deterministic and authoritative |
-| ML layer | scikit-learn, running **locally** (no data leaves the machine) |
+| ML layer | scikit-learn, running in our own Render service (never a third-party AI service) |
 | Data model | HL7 FHIR R4 (`fhir.resources` in Python, `@types/fhir` in TS) |
 | Mock patients | Synthea (Java CLI, run once to generate data) |
 | JS package manager | pnpm (version pinned in root `package.json`) |
 
-The Python backend is **not** part of the pnpm workspace. The TS apps talk to it over HTTP/WebSocket.
-To keep the two languages in sync, generate TS types from FastAPI's OpenAPI schema
-(e.g. `openapi-typescript`) rather than hand-writing duplicate types.
+The Python services are **not** part of the pnpm workspace, and they don't talk to the apps directly:
+Python writes to Supabase (secret key), the apps read with `@supabase/supabase-js` + Realtime
+(publishable key + sign-in). The one exception is the demo controls (trigger sepsis, oxygen, ...),
+which are HTTP POSTs to the simulator on Render. Row types in `packages/shared` mirror the SQL by
+hand; if they drift, generate them with `supabase gen types typescript`.
+
+```
+Synthea -> transform -> data/clean/ (committed)
+                            |
+             Render: sim/ --+--> Supabase: patients, encounters, vitals --Realtime--> nurse-web (Vercel)
+             Render: NEWS2 agent <-- vitals, --> alerts ---------------------Realtime--> patient-desktop
+```
 
 ## Prerequisites
 
 - Node + pnpm: everyone. pnpm is auto-downloaded via `devEngines`.
-- Python 3.12+ and [`uv`](https://docs.astral.sh/uv/): everyone working on the backend.
-  `uv sync` in `services/api/` installs dependencies from `pyproject.toml` / `uv.lock`.
+- Python 3.12+: everyone working on the backend. Use a venv:
+  `python3.12 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`.
+  (The data pipeline and simulator also run on plain `python3` 3.9+, stdlib only, without Supabase.)
+- Supabase settings: `cp .env_sample .env` and fill in the keys (Project Settings -> API Keys).
+  Frontend: `cp apps/nurse-web/.env.example apps/nurse-web/.env`.
 - Java 17 (LTS): **only** to regenerate Synthea data. `data/clean/` is committed, so most
   people never need Java. Mac: `brew install openjdk@17`.
 
@@ -56,14 +69,27 @@ pnpm typecheck
 pnpm lint
 ```
 
-Backend commands (to be set up):
+Data pipeline + simulator (Python):
 
 ```sh
-cd services/api
-uv sync
-uv run fastapi dev app/main.py
-uv run pytest
+pnpm data:synthea     # 1. generate: Synthea -> data/raw/ (needs Java 17+)
+pnpm data:transform   # 2. transform: data/raw/fhir -> scrubbed data/clean/
+pnpm sim:demo         # 3. simulate: scripted demo, fast-forwarded, printed as a table
+pnpm sim:serve        #    same demo live on http://127.0.0.1:8765 (2 s = 15 min); also writes to
+                      #    Supabase when SUPABASE_URL + SUPABASE_SECRET_KEY are set (needs the venv)
+pnpm test:sim         # simulator + transform + Supabase-writer tests (no network)
 ```
+
+## Deployment
+
+1. **Supabase**: apply `supabase/migrations/` (SQL editor, or `supabase link` + `supabase db push`).
+   Create staff users under Authentication; RLS lets only signed-in users read.
+2. **Render**: New -> Blueprint -> this repo (`render.yaml`). Set `SUPABASE_URL` and
+   `SUPABASE_SECRET_KEY`. `data/clean/` must be committed. Free instances sleep and stop the
+   simulator, so demo on a paid instance. Demo controls need `Authorization: Bearer $SIM_CONTROL_TOKEN`.
+3. **Vercel**: import the repo, Root Directory `apps/nurse-web` (Vite is auto-detected). Set
+   `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. If install fails on the pinned pnpm
+   version, add `ENABLE_EXPERIMENTAL_COREPACK=1`.
 
 ## Privacy rules (non-negotiable)
 
@@ -73,11 +99,15 @@ uv run pytest
 - Key everything on random **pseudonymous IDs** (`Patient.id` / `Encounter.id`).
 - **A bed number is a display label only, never a key.** Model beds as FHIR `Location` resources
   linked from `Encounter.location`. Patients transfer, and beds get reused.
-- The ML model runs locally. If an external LLM is ever called, it only receives
-  pseudonymized clinical data.
-- Known violation to fix: `packages/shared/src/index.ts` `Patient` currently has
-  `firstName`/`lastName` and uses `room` as an attribute. Replace it with pseudonymous ID +
-  age band + bed display label.
+- Only pseudonymized data is stored in Supabase or sent to Render. Scoring and the ML model run in
+  our own Render service; no third-party AI service receives patient data. If an external LLM is
+  ever called, it only receives pseudonymized clinical data.
+- RLS is on for every Supabase table. The secret key (bypasses RLS) lives only in Render and local
+  `.env`, never in a frontend or a `VITE_` variable. Browsers use the publishable key + sign-in.
+- Scenario ground truth (who is "septic") is never written to Supabase; the agent and the nurse UI
+  only see the vitals stream.
+- `packages/shared` `Patient` is pseudonymous ID + age band; the bed label lives on
+  `Encounter.location.display` (fixed; it used to have `firstName`/`lastName`/`room`).
 
 ## Pipeline (separate, independent steps)
 
@@ -98,7 +128,7 @@ Keep the steps independent so a simulator bug never requires regenerating data.
 - Use the prebuilt `synthea-with-dependencies.jar` (keep it in a gitignored `tools/` dir).
 - Example: `java -jar synthea-with-dependencies.jar -s 42 -p 10 -a 60-90 --exporter.years_of_history=5 Massachusetts`
   - `-s` is the seed. Keep it fixed so the whole team gets identical data. `-p` is population size and `-a` is the age range.
-- Output goes to `output/fhir/`, one transaction Bundle per patient. Bundles are large (often MBs),
+- `Synthea_Gen/synthea.py` writes to `data/raw/fhir/` (Synthea's own default is `output/fhir/`), one transaction Bundle per patient. Bundles are large (often MBs),
   so start with small populations.
 - **Gotcha:** references inside bundles are usually `urn:uuid:...` matching each entry's
   `fullUrl`, not `Patient/<id>`. Build a `fullUrl -> resource` map to resolve them.
@@ -110,9 +140,11 @@ Synthea actually emits:
 
 - Heart rate `8867-4`
 - Respiratory rate `9279-1`
-- Blood pressure panel `85354-9`, with components systolic `8480-6` and diastolic `8462-6`
+- Blood pressure panel `85354-9`, with components systolic `8480-6` and diastolic `8462-4`
+  (verified in Synthea output)
 - Body temperature `8310-5`
-- Oxygen saturation: more than one code exists (e.g. `59408-5`, `2708-6`). Confirm which one Synthea uses.
+- Oxygen saturation: Synthea emits both `59408-5` and `2708-6`, but rarely (1 patient each in a
+  25-patient run), so the simulator generates SpO2 rather than relying on Synthea values.
 
 Observation essentials: `status`, `category` = `vital-signs`, `code` (LOINC), `subject`,
 `encounter`, `effectiveDateTime` (current sim time), and `valueQuantity` (UCUM units).
@@ -153,9 +185,7 @@ runs are reproducible.
 
 ## Open decisions (ask before building)
 
-- Where the transform + simulate steps live: Python (`services/api`, alongside scoring) vs. TS.
-  Python is currently assumed.
-- Transport: the backend reads from a **HAPI FHIR server** (Docker `hapiproject/hapi`, more
-  realistic) vs. a **direct event stream** (FastAPI WebSocket, faster to build).
+- How the NEWS2 agent consumes vitals: Supabase Realtime subscription vs. polling `vitals`.
+- Whether to also store vitals as FHIR `Observation` JSON (today: one wide `vitals` row per tick).
 - Exactly what the scikit-learn model does (artifact detection, trend, or both).
 - Stretch: replay one patient from the MIMIC-IV demo on FHIR (PhysioNet) as a "real data" showcase.

@@ -10,7 +10,11 @@ release
 .vscode/*
 !.vscode/extensions.json
 
-# Synthea
-.cache
-data/synthea
+# Synthea: jar + raw output (raw has names/addresses - never commit)
+tools/
+data/raw/
 __pycache__
+
+# Local settings and Python virtualenv (never commit) - .env_sample is the shared template
+.env
+.venv/

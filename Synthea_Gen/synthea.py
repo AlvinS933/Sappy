@@ -3,19 +3,21 @@
 and sanity-check the output.
 
 Usage:
-  python3 scripts/synthea.py [-p POPULATION] [-s SEED] [-a AGE_RANGE] [-S STATE] [-c CITY] [-- extra synthea args]
+  python3 Synthea_Gen/synthea.py [-p POPULATION] [-s SEED] [-a AGE_RANGE] [-S STATE] [-c CITY] [-- extra synthea args]
 
 Examples:
-  python3 scripts/synthea.py                       # 25 adult patients in Boston, MA, seed 1984
-  python3 scripts/synthea.py -p 100 -s 42          # 100 patients, different seed
-  python3 scripts/synthea.py -- --exporter.years_of_history=2
+  python3 Synthea_Gen/synthea.py                       # 25 adult patients in Boston, MA, seed 1984
+  python3 Synthea_Gen/synthea.py -p 100 -s 42          # 100 patients, different seed
+  python3 Synthea_Gen/synthea.py -- --exporter.years_of_history=2
 
-Output (gitignored):
-  data/synthea/csv/   patients.csv, observations.csv, conditions.csv, medications.csv, ...
-  data/synthea/fhir/  one FHIR R4 Bundle JSON per patient
+Output (gitignored - raw data contains names/addresses, never commit it):
+  data/raw/csv/   patients.csv, observations.csv, conditions.csv, medications.csv, ...
+  data/raw/fhir/  one FHIR R4 Bundle JSON per patient
 
 Requires Java 17+ and Python 3.9+ (standard library only).
-The Synthea jar is downloaded once to .cache/synthea/. Set SYNTHEA_VERSION to pin another release.
+The Synthea jar is downloaded once to tools/ (gitignored).
+Defaults come from .env (see .env_sample): SYNTHEA_VERSION, SYNTHEA_SEED, SYNTHEA_POPULATION,
+SYNTHEA_AGES, SYNTHEA_STATE, SYNTHEA_CITY. Command-line flags override them.
 """
 
 from __future__ import annotations
@@ -32,10 +34,32 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+def load_dotenv(path: Path) -> None:
+    """Minimal .env reader (stdlib only): KEY=VALUE lines, # comments, optional quotes/`export`.
+    Variables already set in the real environment win over the file."""
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[len("export "):].strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        elif " #" in value:  # inline comment on an unquoted value
+            value = value.split(" #", 1)[0].rstrip()
+        os.environ.setdefault(key, value)
+
+
+load_dotenv(ROOT / ".env")
 SYNTHEA_VERSION = os.environ.get("SYNTHEA_VERSION", "v4.0.0")
-CACHE_DIR = ROOT / ".cache" / "synthea"
+CACHE_DIR = ROOT / "tools"
 JAR = CACHE_DIR / f"synthea-with-dependencies-{SYNTHEA_VERSION}.jar"
-OUT_DIR = ROOT / "data" / "synthea"
+OUT_DIR = ROOT / "data" / "raw"
 
 REQUIRED_CSVS = ("patients.csv", "observations.csv", "conditions.csv", "encounters.csv", "medications.csv")
 
@@ -151,11 +175,12 @@ def main(argv=None) -> None:
         description="Generate synthetic patients with Synthea.",
         epilog="Anything after -- is passed straight to Synthea, e.g. -- --exporter.years_of_history=2",
     )
-    parser.add_argument("-p", "--population", type=int, default=25)
-    parser.add_argument("-s", "--seed", type=int, default=1984)
-    parser.add_argument("-a", "--ages", default="18-90", help="age range, e.g. 18-90")
-    parser.add_argument("-S", "--state", default="Massachusetts")
-    parser.add_argument("-c", "--city", default="Boston")
+    env = os.environ.get
+    parser.add_argument("-p", "--population", type=int, default=int(env("SYNTHEA_POPULATION", 25)))
+    parser.add_argument("-s", "--seed", type=int, default=int(env("SYNTHEA_SEED", 1984)))
+    parser.add_argument("-a", "--ages", default=env("SYNTHEA_AGES", "18-90"), help="age range, e.g. 18-90")
+    parser.add_argument("-S", "--state", default=env("SYNTHEA_STATE", "Massachusetts"))
+    parser.add_argument("-c", "--city", default=env("SYNTHEA_CITY", "Boston"))
     parser.add_argument("extra", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.extra[:1] == ["--"]:

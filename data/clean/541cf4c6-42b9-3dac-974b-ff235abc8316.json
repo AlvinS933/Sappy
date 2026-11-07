@@ -1,0 +1,167 @@
+{
+  "id": "541cf4c6-42b9-3dac-974b-ff235abc8316",
+  "ageBand": "20-29",
+  "gender": "female",
+  "conditions": [
+    {
+      "system": "http://snomed.info/sct",
+      "code": "408512008",
+      "display": "Body mass index 40+ - severely obese (finding)"
+    }
+  ],
+  "medications": [],
+  "observations": [
+    {
+      "code": "29463-7",
+      "display": "Body Weight",
+      "category": "vital-signs",
+      "value": 103.5,
+      "unit": "kg",
+      "effectiveDate": "2026-04-17"
+    },
+    {
+      "code": "32207-3",
+      "display": "Platelet distribution width [Entitic volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 423.16,
+      "unit": "fL",
+      "effectiveDate": "2023-02-24"
+    },
+    {
+      "code": "32623-1",
+      "display": "Platelet [Entitic mean volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 10.008,
+      "unit": "fL",
+      "effectiveDate": "2023-02-24"
+    },
+    {
+      "code": "39156-5",
+      "display": "Body mass index (BMI) [Ratio]",
+      "category": "vital-signs",
+      "value": 40.29,
+      "unit": "kg/m2",
+      "effectiveDate": "2026-04-17"
+    },
+    {
+      "code": "4544-3",
+      "display": "Hematocrit [Volume Fraction] of Blood by Automated count",
+      "category": "laboratory",
+      "value": 36.51,
+      "unit": "%",
+      "effectiveDate": "2023-02-24"
+    },
+    {
+      "code": "6690-2",
+      "display": "Leukocytes [#/volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 7.6179,
+      "unit": "10*3/uL",
+      "effectiveDate": "2023-02-24"
+    },
+    {
+      "code": "718-7",
+      "display": "Hemoglobin [Mass/volume] in Blood",
+      "category": "laboratory",
+      "value": 12.63,
+      "unit": "g/dL",
+      "effectiveDate": "2023-02-24"
+    },
+    {
+      "code": "72514-3",
+      "display": "Pain severity - 0-10 verbal numeric rating [Score] - Reported",
+      "category": "vital-signs",
+      "value": 1,
+      "unit": "{score}",
+      "effectiveDate": "2026-04-17"
+    },
+    {
+      "code": "777-3",
+      "display": "Platelets [#/volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 368.16,
+      "unit": "10*3/uL",
+      "effectiveDate": "2023-02-24"
+    },
+    {
+      "code": "785-6",
+      "display": "MCH [Entitic mass] by Automated count",
+      "category": "laboratory",
+      "value": 30.056,
+      "unit": "pg",
+      "effectiveDate": "2023-02-24"
+    },
+    {
+      "code": "786-4",
+      "display": "MCHC [Entitic Mass/volume] in Red Blood Cells by Automated count",
+      "category": "laboratory",
+      "value": 34.196,
+      "unit": "g/dL",
+      "effectiveDate": "2023-02-24"
+    },
+    {
+      "code": "787-2",
+      "display": "MCV [Entitic mean volume] in Red Blood Cells by Automated count",
+      "category": "laboratory",
+      "value": 91.554,
+      "unit": "fL",
+      "effectiveDate": "2023-02-24"
+    },
+    {
+      "code": "788-0",
+      "display": "Erythrocyte [DistWidth] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 40.799,
+      "unit": "fL",
+      "effectiveDate": "2023-02-24"
+    },
+    {
+      "code": "789-8",
+      "display": "Erythrocytes [#/volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 4.432,
+      "unit": "10*6/uL",
+      "effectiveDate": "2023-02-24"
+    },
+    {
+      "code": "8302-2",
+      "display": "Body Height",
+      "category": "vital-signs",
+      "value": 160.3,
+      "unit": "cm",
+      "effectiveDate": "2026-04-17"
+    },
+    {
+      "code": "8462-4",
+      "display": "Diastolic Blood Pressure",
+      "category": "vital-signs",
+      "value": 75,
+      "unit": "mm[Hg]",
+      "effectiveDate": "2026-04-17"
+    },
+    {
+      "code": "8480-6",
+      "display": "Systolic Blood Pressure",
+      "category": "vital-signs",
+      "value": 127,
+      "unit": "mm[Hg]",
+      "effectiveDate": "2026-04-17"
+    },
+    {
+      "code": "8867-4",
+      "display": "Heart rate",
+      "category": "vital-signs",
+      "value": 99,
+      "unit": "/min",
+      "effectiveDate": "2026-04-17"
+    },
+    {
+      "code": "9279-1",
+      "display": "Respiratory rate",
+      "category": "vital-signs",
+      "value": 15,
+      "unit": "/min",
+      "effectiveDate": "2026-04-17"
+    }
+  ]
+}

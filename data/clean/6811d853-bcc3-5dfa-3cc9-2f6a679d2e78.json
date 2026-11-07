@@ -1,0 +1,413 @@
+{
+  "id": "6811d853-bcc3-5dfa-3cc9-2f6a679d2e78",
+  "ageBand": "80-89",
+  "gender": "female",
+  "conditions": [
+    {
+      "system": "http://snomed.info/sct",
+      "code": "162864005",
+      "display": "Body mass index 30+ - obesity (finding)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "431855005",
+      "display": "Chronic kidney disease stage 1 (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "431856006",
+      "display": "Chronic kidney disease stage 2 (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "40055000",
+      "display": "Chronic sinusitis (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "127013003",
+      "display": "Disorder of kidney due to diabetes mellitus (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "59621000",
+      "display": "Essential hypertension (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "66383009",
+      "display": "Gingivitis (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "414545008",
+      "display": "Ischemic heart disease (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "90781000119102",
+      "display": "Microalbuminuria due to type 2 diabetes mellitus (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "239873007",
+      "display": "Osteoarthritis of knee (disorder)"
+    }
+  ],
+  "medications": [
+    {
+      "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+      "code": "866412",
+      "display": "24 HR metoprolol succinate 100 MG Extended Release Oral Tablet"
+    },
+    {
+      "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+      "code": "309362",
+      "display": "Clopidogrel 75 MG Oral Tablet"
+    },
+    {
+      "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+      "code": "310798",
+      "display": "Hydrochlorothiazide 25 MG Oral Tablet"
+    },
+    {
+      "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+      "code": "106258",
+      "display": "Hydrocortisone 10 MG/ML Topical Cream"
+    },
+    {
+      "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+      "code": "705129",
+      "display": "Nitroglycerin 0.4 MG/ACTUAT Mucosal Spray"
+    },
+    {
+      "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+      "code": "312961",
+      "display": "Simvastatin 20 MG Oral Tablet"
+    },
+    {
+      "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+      "code": "308136",
+      "display": "amLODIPine 2.5 MG Oral Tablet"
+    },
+    {
+      "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+      "code": "314076",
+      "display": "lisinopril 10 MG Oral Tablet"
+    }
+  ],
+  "observations": [
+    {
+      "code": "17861-6",
+      "display": "Calcium [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 10.09,
+      "unit": "mg/dL",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "18262-6",
+      "display": "Cholesterol in LDL [Mass/volume] in Serum or Plasma by Direct assay",
+      "category": "laboratory",
+      "value": 106.24,
+      "unit": "mg/dL",
+      "effectiveDate": "2026-06-03"
+    },
+    {
+      "code": "2028-9",
+      "display": "Carbon dioxide, total [Moles/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 23.11,
+      "unit": "mmol/L",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "20505-4",
+      "display": "Bilirubin.total [Mass/volume] in Urine by Test strip",
+      "category": "laboratory",
+      "value": 0.21319,
+      "unit": "mg/dL",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "2075-0",
+      "display": "Chloride [Moles/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 108.7,
+      "unit": "mmol/L",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "2085-9",
+      "display": "Cholesterol in HDL [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 53.23,
+      "unit": "mg/dL",
+      "effectiveDate": "2026-06-03"
+    },
+    {
+      "code": "2093-3",
+      "display": "Cholesterol [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 182.1,
+      "unit": "mg/dL",
+      "effectiveDate": "2026-06-03"
+    },
+    {
+      "code": "2160-0",
+      "display": "Creatinine [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 1.9315,
+      "unit": "mg/dL",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "2345-7",
+      "display": "Glucose [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 89.57,
+      "unit": "mg/dL",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "2571-8",
+      "display": "Triglyceride [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 113.11,
+      "unit": "mg/dL",
+      "effectiveDate": "2026-06-03"
+    },
+    {
+      "code": "2823-3",
+      "display": "Potassium [Moles/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 4.85,
+      "unit": "mmol/L",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "29463-7",
+      "display": "Body Weight",
+      "category": "vital-signs",
+      "value": 76.5,
+      "unit": "kg",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "2951-2",
+      "display": "Sodium [Moles/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 140.61,
+      "unit": "mmol/L",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "3094-0",
+      "display": "Urea nitrogen [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 10.87,
+      "unit": "mg/dL",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "32207-3",
+      "display": "Platelet distribution width [Entitic volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 367.42,
+      "unit": "fL",
+      "effectiveDate": "2023-05-17"
+    },
+    {
+      "code": "32623-1",
+      "display": "Platelet [Entitic mean volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 12.001,
+      "unit": "fL",
+      "effectiveDate": "2023-05-17"
+    },
+    {
+      "code": "33914-3",
+      "display": "Glomerular filtration rate [Volume Rate/Area] in Serum or Plasma by Creatinine-based formula (MDRD)/1.73 sq M",
+      "category": "laboratory",
+      "value": 69.65,
+      "unit": "mL/min/{1.73_m2}",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "39156-5",
+      "display": "Body mass index (BMI) [Ratio]",
+      "category": "vital-signs",
+      "value": 27.83,
+      "unit": "kg/m2",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "4544-3",
+      "display": "Hematocrit [Volume Fraction] of Blood by Automated count",
+      "category": "laboratory",
+      "value": 39.492,
+      "unit": "%",
+      "effectiveDate": "2023-05-17"
+    },
+    {
+      "code": "5792-7",
+      "display": "Glucose [Mass/volume] in Urine by Test strip",
+      "category": "laboratory",
+      "value": 2.2957,
+      "unit": "mg/dL",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "5797-6",
+      "display": "Ketones [Mass/volume] in Urine by Test strip",
+      "category": "laboratory",
+      "value": 16.736,
+      "unit": "mg/dL",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "5803-2",
+      "display": "pH of Urine by Test strip",
+      "category": "laboratory",
+      "value": 6.861,
+      "unit": "pH",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "5804-0",
+      "display": "Protein [Mass/volume] in Urine by Test strip",
+      "category": "laboratory",
+      "value": 320.04,
+      "unit": "mg/dL",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "5811-5",
+      "display": "Specific gravity of Urine by Test strip",
+      "category": "laboratory",
+      "value": 1.0351,
+      "unit": "{nominal}",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "6690-2",
+      "display": "Leukocytes [#/volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 5.5773,
+      "unit": "10*3/uL",
+      "effectiveDate": "2023-05-17"
+    },
+    {
+      "code": "718-7",
+      "display": "Hemoglobin [Mass/volume] in Blood",
+      "category": "laboratory",
+      "value": 16.536,
+      "unit": "g/dL",
+      "effectiveDate": "2023-05-17"
+    },
+    {
+      "code": "72514-3",
+      "display": "Pain severity - 0-10 verbal numeric rating [Score] - Reported",
+      "category": "vital-signs",
+      "value": 2,
+      "unit": "{score}",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "777-3",
+      "display": "Platelets [#/volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 300.6,
+      "unit": "10*3/uL",
+      "effectiveDate": "2023-05-17"
+    },
+    {
+      "code": "785-6",
+      "display": "MCH [Entitic mass] by Automated count",
+      "category": "laboratory",
+      "value": 32.686,
+      "unit": "pg",
+      "effectiveDate": "2023-05-17"
+    },
+    {
+      "code": "786-4",
+      "display": "MCHC [Entitic Mass/volume] in Red Blood Cells by Automated count",
+      "category": "laboratory",
+      "value": 34.175,
+      "unit": "g/dL",
+      "effectiveDate": "2023-05-17"
+    },
+    {
+      "code": "787-2",
+      "display": "MCV [Entitic mean volume] in Red Blood Cells by Automated count",
+      "category": "laboratory",
+      "value": 80.12,
+      "unit": "fL",
+      "effectiveDate": "2023-05-17"
+    },
+    {
+      "code": "788-0",
+      "display": "Erythrocyte [DistWidth] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 41.423,
+      "unit": "fL",
+      "effectiveDate": "2023-05-17"
+    },
+    {
+      "code": "789-8",
+      "display": "Erythrocytes [#/volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 4.8212,
+      "unit": "10*6/uL",
+      "effectiveDate": "2023-05-17"
+    },
+    {
+      "code": "8302-2",
+      "display": "Body Height",
+      "category": "vital-signs",
+      "value": 165.8,
+      "unit": "cm",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "8310-5",
+      "display": "Body temperature",
+      "category": "vital-signs",
+      "value": 37.738,
+      "unit": "Cel",
+      "effectiveDate": "2026-08-01"
+    },
+    {
+      "code": "8462-4",
+      "display": "Diastolic Blood Pressure",
+      "category": "vital-signs",
+      "value": 72,
+      "unit": "mm[Hg]",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "8480-6",
+      "display": "Systolic Blood Pressure",
+      "category": "vital-signs",
+      "value": 108,
+      "unit": "mm[Hg]",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "8867-4",
+      "display": "Heart rate",
+      "category": "vital-signs",
+      "value": 96,
+      "unit": "/min",
+      "effectiveDate": "2026-08-12"
+    },
+    {
+      "code": "9279-1",
+      "display": "Respiratory rate",
+      "category": "vital-signs",
+      "value": 16,
+      "unit": "/min",
+      "effectiveDate": "2026-08-12"
+    }
+  ]
+}

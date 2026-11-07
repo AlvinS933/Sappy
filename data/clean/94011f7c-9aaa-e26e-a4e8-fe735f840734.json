@@ -1,0 +1,445 @@
+{
+  "id": "94011f7c-9aaa-e26e-a4e8-fe735f840734",
+  "ageBand": "60-69",
+  "gender": "male",
+  "conditions": [
+    {
+      "system": "http://snomed.info/sct",
+      "code": "7200002",
+      "display": "Alcoholism (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "271737000",
+      "display": "Anemia (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "162864005",
+      "display": "Body mass index 30+ - obesity (finding)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "431855005",
+      "display": "Chronic kidney disease stage 1 (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "127013003",
+      "display": "Disorder of kidney due to diabetes mellitus (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "59621000",
+      "display": "Essential hypertension (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "237602007",
+      "display": "Metabolic syndrome X (disorder)"
+    },
+    {
+      "system": "http://snomed.info/sct",
+      "code": "714628002",
+      "display": "Prediabetes (finding)"
+    }
+  ],
+  "medications": [
+    {
+      "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+      "code": "106892",
+      "display": "insulin isophane, human 70 UNT/ML / insulin, regular, human 30 UNT/ML Injectable Suspension [Humulin]"
+    },
+    {
+      "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+      "code": "314076",
+      "display": "lisinopril 10 MG Oral Tablet"
+    }
+  ],
+  "observations": [
+    {
+      "code": "17861-6",
+      "display": "Calcium [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 9.84,
+      "unit": "mg/dL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "18262-6",
+      "display": "Cholesterol in LDL [Mass/volume] in Serum or Plasma by Direct assay",
+      "category": "laboratory",
+      "value": 111.44,
+      "unit": "mg/dL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "2028-9",
+      "display": "Carbon dioxide, total [Moles/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 28.5,
+      "unit": "mmol/L",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "20505-4",
+      "display": "Bilirubin.total [Mass/volume] in Urine by Test strip",
+      "category": "laboratory",
+      "value": 0.46745,
+      "unit": "mg/dL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "20565-8",
+      "display": "Carbon dioxide, total [Moles/volume] in Blood",
+      "category": "laboratory",
+      "value": 28.5,
+      "unit": "mmol/L",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "2069-3",
+      "display": "Chloride [Moles/volume] in Blood",
+      "category": "laboratory",
+      "value": 110.39,
+      "unit": "mmol/L",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "2075-0",
+      "display": "Chloride [Moles/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 110.39,
+      "unit": "mmol/L",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "2085-9",
+      "display": "Cholesterol in HDL [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 53.5,
+      "unit": "mg/dL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "2093-3",
+      "display": "Cholesterol [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 189.19,
+      "unit": "mg/dL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "2160-0",
+      "display": "Creatinine [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 1.662,
+      "unit": "mg/dL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "2339-0",
+      "display": "Glucose [Mass/volume] in Blood",
+      "category": "laboratory",
+      "value": 99.55,
+      "unit": "mg/dL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "2345-7",
+      "display": "Glucose [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 99.55,
+      "unit": "mg/dL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "2571-8",
+      "display": "Triglyceride [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 121.25,
+      "unit": "mg/dL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "2823-3",
+      "display": "Potassium [Moles/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 4.22,
+      "unit": "mmol/L",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "2857-1",
+      "display": "Prostate specific Ag [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 3.5737,
+      "unit": "ng/mL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "29463-7",
+      "display": "Body Weight",
+      "category": "vital-signs",
+      "value": 86.3,
+      "unit": "kg",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "2947-0",
+      "display": "Sodium [Moles/volume] in Blood",
+      "category": "laboratory",
+      "value": 143.75,
+      "unit": "mmol/L",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "2951-2",
+      "display": "Sodium [Moles/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 143.75,
+      "unit": "mmol/L",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "3094-0",
+      "display": "Urea nitrogen [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 8.01,
+      "unit": "mg/dL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "32207-3",
+      "display": "Platelet distribution width [Entitic volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 398.33,
+      "unit": "fL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "32623-1",
+      "display": "Platelet [Entitic mean volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 10.332,
+      "unit": "fL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "33914-3",
+      "display": "Glomerular filtration rate [Volume Rate/Area] in Serum or Plasma by Creatinine-based formula (MDRD)/1.73 sq M",
+      "category": "laboratory",
+      "value": 143.24,
+      "unit": "mL/min/{1.73_m2}",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "38483-4",
+      "display": "Creatinine [Mass/volume] in Blood",
+      "category": "laboratory",
+      "value": 1.18,
+      "unit": "mg/dL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "39156-5",
+      "display": "Body mass index (BMI) [Ratio]",
+      "category": "vital-signs",
+      "value": 30.69,
+      "unit": "kg/m2",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "4544-3",
+      "display": "Hematocrit [Volume Fraction] of Blood by Automated count",
+      "category": "laboratory",
+      "value": 36.578,
+      "unit": "%",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "4548-4",
+      "display": "Hemoglobin A1c/Hemoglobin.total in Blood",
+      "category": "laboratory",
+      "value": 2.95,
+      "unit": "%",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "49765-1",
+      "display": "Calcium [Mass/volume] in Blood",
+      "category": "laboratory",
+      "value": 9.84,
+      "unit": "mg/dL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "5792-7",
+      "display": "Glucose [Mass/volume] in Urine by Test strip",
+      "category": "laboratory",
+      "value": 1.0255,
+      "unit": "mg/dL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "5797-6",
+      "display": "Ketones [Mass/volume] in Urine by Test strip",
+      "category": "laboratory",
+      "value": 5.4096,
+      "unit": "mg/dL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "5803-2",
+      "display": "pH of Urine by Test strip",
+      "category": "laboratory",
+      "value": 5.2162,
+      "unit": "pH",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "5804-0",
+      "display": "Protein [Mass/volume] in Urine by Test strip",
+      "category": "laboratory",
+      "value": 79.802,
+      "unit": "mg/dL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "5811-5",
+      "display": "Specific gravity of Urine by Test strip",
+      "category": "laboratory",
+      "value": 1.0358,
+      "unit": "{nominal}",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "6298-4",
+      "display": "Potassium [Moles/volume] in Blood",
+      "category": "laboratory",
+      "value": 4.22,
+      "unit": "mmol/L",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "6299-2",
+      "display": "Urea nitrogen [Mass/volume] in Blood",
+      "category": "laboratory",
+      "value": 8.01,
+      "unit": "mg/dL",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "6690-2",
+      "display": "Leukocytes [#/volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 4.6225,
+      "unit": "10*3/uL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "718-7",
+      "display": "Hemoglobin [Mass/volume] in Blood",
+      "category": "laboratory",
+      "value": 16.192,
+      "unit": "g/dL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "72514-3",
+      "display": "Pain severity - 0-10 verbal numeric rating [Score] - Reported",
+      "category": "vital-signs",
+      "value": 1,
+      "unit": "{score}",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "777-3",
+      "display": "Platelets [#/volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 414.4,
+      "unit": "10*3/uL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "785-6",
+      "display": "MCH [Entitic mass] by Automated count",
+      "category": "laboratory",
+      "value": 31.125,
+      "unit": "pg",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "786-4",
+      "display": "MCHC [Entitic Mass/volume] in Red Blood Cells by Automated count",
+      "category": "laboratory",
+      "value": 33.21,
+      "unit": "g/dL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "787-2",
+      "display": "MCV [Entitic mean volume] in Red Blood Cells by Automated count",
+      "category": "laboratory",
+      "value": 83.964,
+      "unit": "fL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "788-0",
+      "display": "Erythrocyte [DistWidth] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 41.942,
+      "unit": "fL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "789-8",
+      "display": "Erythrocytes [#/volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 4.5977,
+      "unit": "10*6/uL",
+      "effectiveDate": "2024-12-24"
+    },
+    {
+      "code": "8302-2",
+      "display": "Body Height",
+      "category": "vital-signs",
+      "value": 167.7,
+      "unit": "cm",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "8462-4",
+      "display": "Diastolic Blood Pressure",
+      "category": "vital-signs",
+      "value": 99,
+      "unit": "mm[Hg]",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "8480-6",
+      "display": "Systolic Blood Pressure",
+      "category": "vital-signs",
+      "value": 123,
+      "unit": "mm[Hg]",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "8867-4",
+      "display": "Heart rate",
+      "category": "vital-signs",
+      "value": 72,
+      "unit": "/min",
+      "effectiveDate": "2025-12-30"
+    },
+    {
+      "code": "9279-1",
+      "display": "Respiratory rate",
+      "category": "vital-signs",
+      "value": 14,
+      "unit": "/min",
+      "effectiveDate": "2025-12-30"
+    }
+  ]
+}

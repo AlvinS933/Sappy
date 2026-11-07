@@ -1,0 +1,22 @@
+# Python dependencies. Needs Python 3.12+.
+#
+#   python3.12 -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+#
+# Hosting: frontends on Vercel, Python services on Render, data in Supabase.
+# The current pipeline (Synthea_Gen/*.py, sim/*.py) uses only the standard library and does not
+# need any of these yet.
+
+# Supabase client (Postgres, realtime, auth) for Python services on Render
+supabase==2.34.1
+
+# FHIR data model. Note: fhir.resources defaults to FHIR R5; import from the version
+# subpackage that matches our data rather than the top-level package.
+fhir.resources==8.3.0
+
+# Local ML layer (artifact / trend detection)
+scikit-learn==1.9.1
+numpy==2.5.4
+
+# Testing
+pytest==9.2.0
