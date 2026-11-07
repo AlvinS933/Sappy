@@ -4,7 +4,16 @@ import aiConfig from '../ai.config.json'
 type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
 const SYSTEM_PROMPT = `You are a helpful and human-friendly assistant for a hospital patient...`
-
+const MAX_MESSAGES = 20 
+const MAX_CHARS = 8_000
+function trimHistory(messages: ChatMessage[]): ChatMessage[] {
+  let recent = messages.slice(-MAX_MESSAGES)
+  while (recent.length> 1 && recent.reduce((sum, m) => sum + m.content.length, 0) > MAX_CHARS) {
+    recent = recent.slice(1)
+  }
+  while (recent.length > 1 && recent[0].role === 'assistant') recent = recent.slice(1)
+  return recent
+}
 // Only accept well-formed user/assistant messages from the renderer,
 // so the page can't inject its own system prompt.
 function sanitize(messages: unknown): ChatMessage[] {
@@ -30,7 +39,7 @@ export function registerAiHandlers() {
         model: aiConfig.model,
         stream: false,
         think: false, // skip Qwen's "thinking" step: much faster replies
-        messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...sanitize(messages)],
+        messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...trimHistory(sanitize(messages))],
       }),
     })
     if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`)
