@@ -11,6 +11,10 @@
     "dist",
     "dist-electron"
   ],
+  // Local TTS model files (from `pnpm ai:setup`), read at <resources>/models by electron/tts.ts
+  "extraResources": [
+    { "from": ".models", "to": "models" }
+  ],
   "mac": {
     "target": [
       "dmg"

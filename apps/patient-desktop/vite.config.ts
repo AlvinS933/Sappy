@@ -10,8 +10,15 @@ export default defineConfig({
     react(),
     electron({
       main: {
-        // Shortcut of `build.lib.entry`.
-        entry: 'electron/main.ts',
+        // Shortcut of `build.lib.entry`. The TTS worker is a separate file so it can run on its own thread.
+        entry: ['electron/main.ts', 'electron/tts-worker.ts'],
+        vite: {
+          build: {
+            // Load these from node_modules at runtime instead of bundling them
+            // (they include a native ONNX runtime and large data files).
+            rolldownOptions: { external: ['kokoro-js', '@huggingface/transformers'] },
+          },
+        },
       },
       preload: {
         // Shortcut of `build.rollupOptions.input`.

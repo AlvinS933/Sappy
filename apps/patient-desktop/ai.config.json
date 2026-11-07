@@ -1,0 +1,10 @@
+{
+  "model": "qwen3.5:4b",
+  "ollamaHost": "http://127.0.0.1:11434",
+  "tts": {
+    "model": "onnx-community/Kokoro-82M-v1.0-ONNX",
+    "dtype": "fp32",
+    "voice": "af_heart",
+    "speed": 1
+  }
+}
