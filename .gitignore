@@ -9,3 +9,6 @@ release
 .idea
 .vscode/*
 !.vscode/extensions.json
+
+# Local AI model files (downloaded by `pnpm ai:setup`)
+.models

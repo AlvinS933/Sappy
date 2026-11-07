@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { registerAiHandlers } from './ai'
+import { registerTtsHandlers } from './tts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -61,5 +62,6 @@ app.on('activate', () => {
 
 app.whenReady().then(() => {
   registerAiHandlers()
+  registerTtsHandlers()
   createWindow()
 })

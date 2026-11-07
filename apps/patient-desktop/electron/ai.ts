@@ -3,7 +3,7 @@ import aiConfig from '../ai.config.json'
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
-const SYSTEM_PROMPT = `You are a helpful and human-friendly assistant for a hospital patient...`
+const SYSTEM_PROMPT = `You are a helpful and human-friendly assistant for a hospital patient, respond only with two sentences maximum, remain short and concise.`
 const MAX_MESSAGES = 20 
 const MAX_CHARS = 8_000
 function trimHistory(messages: ChatMessage[]): ChatMessage[] {

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import reactLogo from './assets/react.svg'
 import viteLogo from '/electron-vite.animate.svg'
 import './App.css'
+import { useSpeech } from './useSpeech'
 
 type Msg = { role: 'user' | 'assistant'; content: string }
 
@@ -10,28 +11,27 @@ function App() {
   const [input, setInput] = useState<string>('')
   const [messages, setMessages] = useState<Msg[]>([])
   const [loading, setLoading] = useState<boolean>(false)
+  const [voiceOn, setVoiceOn] = useState(true)
+  const { speak, stop, speaking } = useSpeech()
+
   async function send() {
     const text = input.trim()
     if (!text || loading) return
+    stop() // don't keep reading the previous reply over the new one
     const next = [...messages, {role: 'user' as const, content: text}]
     setMessages(next)
     setInput('')
     setLoading(true)
+    let reply: string
     try {
-      const reply = await window.ai.chat(next)
-      setMessages([...next, {role: 'assistant', content: reply}])
+      reply = await window.ai.chat(next)
     } catch (err) {
       console.error('AI chat failed:', err)
-      setMessages([
-        ...next,
-        {
-          role: 'assistant',
-          content: "Sorry, I can't respond right now. Please press the call button if you need a nurse.",
-        },
-      ])
-    } finally {
-      setLoading(false)
+      reply = "Sorry, I can't respond right now. Please press the call button if you need a nurse."
     }
+    setMessages([...next, { role: 'assistant', content: reply }])
+    setLoading(false)
+    if (voiceOn) void speak(reply)
   }
   return (
     <>
@@ -64,6 +64,20 @@ function App() {
           placeholder="Talk to AI..." 
           disabled={loading}
         />
+        <div>
+          <label>
+            <input
+              type="checkbox"
+              checked={voiceOn}
+              onChange={(e) => {
+                setVoiceOn(e.target.checked)
+                if (!e.target.checked) stop()
+              }}
+            />{' '}
+            Read replies aloud
+          </label>
+          {speaking && <button onClick={stop}>Stop speaking</button>}
+        </div>
       </div>
       <p className="read-the-docs">
         Click on the Vite and React logos to learn more
