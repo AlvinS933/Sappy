@@ -9,3 +9,8 @@ release
 .idea
 .vscode/*
 !.vscode/extensions.json
+
+# Synthea
+.cache
+data/synthea
+__pycache__
