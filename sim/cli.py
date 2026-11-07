@@ -16,7 +16,7 @@ Server endpoints (CORS open, for local dev only):
 
 From the browser:
     const es = new EventSource('http://127.0.0.1:8765/stream')
-    es.onmessage = (e) => setVitals(JSON.parse(e.data))   // VitalsReading[]
+    es.onmessage = (e) => setVitals(JSON.parse(e.data))   // VitalsReading[]`
 """
 
 from __future__ import annotations
