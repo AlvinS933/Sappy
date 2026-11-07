@@ -12,3 +12,7 @@ release
 
 # Local AI model files (downloaded by `pnpm ai:setup`)
 .models
+# Synthea
+.cache
+data/synthea
+__pycache__
