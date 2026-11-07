@@ -18,7 +18,6 @@ from vitals_sim import (  # noqa: E402
     SimPatient,
     VitalsSimulator,
     load_synthea_patients,
-    vitals_alerts,
 )
 
 START = 1767254400.0  # 2026-01-01T08:00:00Z
@@ -55,13 +54,21 @@ class SimulatorTests(unittest.TestCase):
         for k in VITAL_SIGNS:
             self.assertIsInstance(r[k], (int, float), k)
         self.assertIsInstance(r["heartRateBpm"], int)
+        self.assertIsInstance(r["respiratoryRate"], int)
         self.assertGreaterEqual(r["systolicMmHg"] - r["diastolicMmHg"], 25)
+        self.assertIs(r["onOxygen"], False)
+        self.assertEqual(r["consciousness"], "A")
 
-    def test_healthy_patient_no_alerts_for_8h(self):
+    def test_healthy_patient_stays_in_normal_range_for_8h(self):
         sim = VitalsSimulator([HEALTHY], start_time=START, event_rate_per_hour=0)
         readings = run(sim, 8 * 60)
         for r in readings:
-            self.assertEqual(vitals_alerts(r), [], r)
+            self.assertTrue(50 < r["heartRateBpm"] < 110, r)
+            self.assertTrue(100 < r["systolicMmHg"] < 180, r)
+            self.assertTrue(93 < r["spo2Percent"] <= 100, r)
+            self.assertTrue(35.5 < r["temperatureC"] < 38, r)
+            self.assertTrue(8 < r["respiratoryRate"] < 21, r)
+            self.assertEqual(r["consciousness"], "A", r)
         self.assertLess(abs(mean(readings, "spo2Percent") - sim.baseline("healthy")["spo2Percent"]), 1)
 
     def test_sepsis_deteriorates_then_recovers(self):
@@ -74,12 +81,38 @@ class SimulatorTests(unittest.TestCase):
         self.assertGreater(mean(peak, "heartRateBpm"), base["heartRateBpm"] + 25)
         self.assertLess(mean(peak, "systolicMmHg"), base["systolicMmHg"] - 20)
         self.assertGreater(mean(peak, "temperatureC"), 38.3)
-        self.assertTrue(any(vitals_alerts(r) for r in peak))
+        self.assertGreater(mean(peak, "respiratoryRate"), base["respiratoryRate"] + 7)
+        self.assertTrue(all(r["consciousness"] == "C" for r in peak))
 
         after = run(sim, 4 * 60)[-60:]
         self.assertEqual(sim.active_events("healthy"), [])
         self.assertLess(abs(mean(after, "heartRateBpm") - base["heartRateBpm"]), 4)
         self.assertLess(abs(mean(after, "temperatureC") - base["temperatureC"]), 0.2)
+        self.assertLess(abs(mean(after, "respiratoryRate") - base["respiratoryRate"]), 2)
+        self.assertTrue(all(r["consciousness"] == "A" for r in after))
+
+    def test_oxygen_raises_spo2(self):
+        sim = VitalsSimulator([HEALTHY], start_time=START, event_rate_per_hour=0)
+        sim.trigger("healthy", "hypoxia", hold_min=math.inf)
+        on_air = run(sim, 30)[-60:]
+        sim.set_oxygen("healthy", True)
+        on_o2 = run(sim, 30)[-60:]
+        self.assertGreater(mean(on_o2, "spo2Percent"), mean(on_air, "spo2Percent") + 4)
+        self.assertTrue(all(r["onOxygen"] for r in on_o2))
+        self.assertTrue(all(r["spo2Percent"] <= 100 for r in on_o2))
+        sim.set_oxygen("healthy", False)
+        self.assertIs(sim.step(5)[0]["onOxygen"], False)
+
+    def test_consciousness_from_severe_hypoxia_and_override(self):
+        sim = VitalsSimulator([HEALTHY], start_time=START, event_rate_per_hour=0)
+        sim.trigger("healthy", "hypoxia", severity=1.8, hold_min=math.inf)  # SpO2 ~80%
+        self.assertEqual(run(sim, 30)[-1]["consciousness"], "C")
+        sim.set_consciousness("healthy", "P")
+        self.assertEqual(sim.step(5)[0]["consciousness"], "P")
+        sim.set_consciousness("healthy", None)
+        self.assertEqual(sim.step(5)[0]["consciousness"], "C")
+        with self.assertRaises(ValueError):
+            sim.set_consciousness("healthy", "X")
 
     def test_hold_until_resolved(self):
         sim = VitalsSimulator([HEALTHY], start_time=START, event_rate_per_hour=0)
@@ -105,14 +138,6 @@ class SimulatorTests(unittest.TestCase):
             sim.trigger("nope", "sepsis")
         with self.assertRaises(ValueError):
             sim.trigger("healthy", "zombie")
-
-    def test_alert_thresholds(self):
-        self.assertEqual(vitals_alerts({"spo2Percent": 97, "heartRateBpm": 72, "systolicMmHg": 120, "temperatureC": 36.8}), [])
-        self.assertEqual(vitals_alerts({"spo2Percent": 92})[0]["level"], "warning")
-        self.assertEqual(vitals_alerts({"spo2Percent": 88})[0]["level"], "critical")
-        self.assertEqual(vitals_alerts({"heartRateBpm": 135})[0]["level"], "critical")
-        self.assertEqual(vitals_alerts({"systolicMmHg": 85})[0]["level"], "critical")
-        self.assertEqual(vitals_alerts({"temperatureC": 38.5})[0]["level"], "warning")
 
 
 @unittest.skipUnless((DEFAULT_CSV_DIR / "patients.csv").exists(), "no Synthea data - run scripts/synthea.py")
@@ -172,6 +197,19 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request("/patients/nope/trigger", {"scenario": "fever"})[0], 404)
         self.assertEqual(self.request(f"/patients/{pid}/trigger", {"scenario": "zombie"})[0], 400)
         self.assertEqual(self.request(f"/patients/{pid}/trigger", {})[0], 400)
+
+    def test_oxygen_and_consciousness(self):
+        _, patients = self.request("/patients")
+        pid = patients[1]["id"]
+        self.assertEqual(self.request(f"/patients/{pid}/oxygen", {"on": True})[0], 200)
+        self.assertEqual(self.request(f"/patients/{pid}/consciousness", {"level": "V"})[0], 200)
+        _, patients = self.request("/patients")
+        p = next(p for p in patients if p["id"] == pid)
+        self.assertEqual((p["onOxygen"], p["consciousnessOverride"]), (True, "V"))
+        self.assertEqual(self.request(f"/patients/{pid}/consciousness", {"level": None})[0], 200)
+        self.assertEqual(self.request(f"/patients/{pid}/oxygen", {"on": "yes"})[0], 400)
+        self.assertEqual(self.request(f"/patients/{pid}/consciousness", {"level": "X"})[0], 400)
+        self.assertEqual(self.request(f"/patients/{pid}/consciousness", {})[0], 400)
 
     def test_sse_stream(self):
         with urllib.request.urlopen(self.base + "/stream", timeout=5) as resp:

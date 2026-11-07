@@ -9,7 +9,7 @@ tachycardia, ...).
 
 Standard library only; Python 3.9+.
 
-    from vitals_sim import VitalsSimulator, load_synthea_patients, vitals_alerts
+    from vitals_sim import VitalsSimulator, load_synthea_patients
 
     sim = VitalsSimulator(load_synthea_patients(), seed=1984)
     sim.trigger(sim.patients[0].id, "sepsis")
@@ -35,7 +35,14 @@ from typing import Dict, Iterator, List, Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CSV_DIR = REPO_ROOT / "data" / "synthea" / "csv"
 
-VITAL_SIGNS = ("heartRateBpm", "systolicMmHg", "diastolicMmHg", "spo2Percent", "temperatureC")
+# Continuous vitals. Readings also carry `onOxygen` (bool) and `consciousness` (ACVPU letter).
+VITAL_SIGNS = ("heartRateBpm", "systolicMmHg", "diastolicMmHg", "spo2Percent", "temperatureC", "respiratoryRate")
+
+# ACVPU: Alert, new Confusion, responds to Voice, responds to Pain, Unresponsive.
+CONSCIOUSNESS_LEVELS = ("A", "C", "V", "P", "U")
+
+# On supplemental oxygen, SpO2 closes this fraction of its gap to 99.5% (hypoxic 88% -> ~95%).
+OXYGEN_EFFECT = 0.6
 
 Vitals = Dict[str, float]
 Reading = Dict[str, object]
@@ -81,6 +88,7 @@ _VITAL_CODES = {
     "2708-6": "spo2Percent",
     "59408-5": "spo2Percent",
     "8310-5": "temperatureC",
+    "9279-1": "respiratoryRate",
 }
 _IGNORED_CONDITIONS = re.compile(r"gingivitis|dental|teeth|molars|oral region", re.I)
 _NON_CLINICAL = re.compile(r"\((finding|situation|person)\)")
@@ -153,19 +161,30 @@ class ScenarioSpec:
     onset_min: float
     hold_min: float
     recovery_min: float
+    # Event intensity (severity x envelope) at which the patient becomes newly confused, if ever.
+    confusion_at: Optional[float] = None
 
 
 SCENARIOS: Dict[str, ScenarioSpec] = {
-    "hypoxia": ScenarioSpec("Hypoxia", {"spo2Percent": -10, "heartRateBpm": 18}, 8, 20, 15),
-    "fever": ScenarioSpec("Fever", {"temperatureC": 1.8, "heartRateBpm": 15}, 30, 60, 60),
+    "hypoxia": ScenarioSpec(
+        "Hypoxia", {"spo2Percent": -10, "heartRateBpm": 18, "respiratoryRate": 8}, 8, 20, 15
+    ),
+    "fever": ScenarioSpec(
+        "Fever", {"temperatureC": 1.8, "heartRateBpm": 15, "respiratoryRate": 3}, 30, 60, 60
+    ),
     "sepsis": ScenarioSpec(
         "Sepsis",
-        {"temperatureC": 2.0, "heartRateBpm": 35, "systolicMmHg": -30, "diastolicMmHg": -18, "spo2Percent": -4},
+        {"temperatureC": 2.0, "heartRateBpm": 35, "systolicMmHg": -30, "diastolicMmHg": -18, "spo2Percent": -4,
+         "respiratoryRate": 10},
         45, 90, 120,
+        confusion_at=0.8,
     ),
-    "tachycardia": ScenarioSpec("Tachycardia", {"heartRateBpm": 50, "systolicMmHg": -8}, 2, 20, 10),
+    "tachycardia": ScenarioSpec(
+        "Tachycardia", {"heartRateBpm": 50, "systolicMmHg": -8, "respiratoryRate": 2}, 2, 20, 10
+    ),
     "hypotension": ScenarioSpec(
-        "Hypotension", {"systolicMmHg": -35, "diastolicMmHg": -20, "heartRateBpm": 25}, 10, 30, 30
+        "Hypotension", {"systolicMmHg": -35, "diastolicMmHg": -20, "heartRateBpm": 25, "respiratoryRate": 4},
+        10, 30, 30,
     ),
     "hypertensive-crisis": ScenarioSpec(
         "Hypertensive crisis", {"systolicMmHg": 55, "diastolicMmHg": 28, "heartRateBpm": 8}, 15, 30, 45
@@ -216,6 +235,7 @@ _DYNAMICS = {
     "diastolicMmHg": _Dynamics(3, 300, 1.5, 30, 140, 0),
     "spo2Percent": _Dynamics(0.7, 60, 0.4, 70, 100, 0),
     "temperatureC": _Dynamics(0.08, 900, 0.03, 34, 42, 1),
+    "respiratoryRate": _Dynamics(0.9, 180, 0.5, 6, 50, 0),
 }
 
 _CHRONIC_LUNG = re.compile(r"copd|chronic obstructive|emphysema|asthma|pulmonary fibrosis", re.I)
@@ -230,6 +250,8 @@ class _PatientState:
     baseline: Vitals
     state: Vitals
     events: List[ActiveEvent] = field(default_factory=list)
+    on_oxygen: bool = False
+    consciousness_override: Optional[str] = None  # None = derived from physiology
 
 
 # ------------------------------------------------------------------------------------------------
@@ -308,6 +330,22 @@ class VitalsSimulator:
             if (scenario is None or e.scenario == scenario) and e.resolved_at is None:
                 e.resolved_at = self._clock
 
+    def on_oxygen(self, patient_id: str) -> bool:
+        return self._get(patient_id).on_oxygen
+
+    def set_oxygen(self, patient_id: str, on: bool) -> None:
+        """Start/stop supplemental oxygen. Raises SpO2 toward 99.5% (see OXYGEN_EFFECT) while on."""
+        self._get(patient_id).on_oxygen = bool(on)
+
+    def consciousness_override(self, patient_id: str) -> Optional[str]:
+        return self._get(patient_id).consciousness_override
+
+    def set_consciousness(self, patient_id: str, level: Optional[str]) -> None:
+        """Force an ACVPU level ("A", "C", "V", "P", "U"), or None to go back to deriving it."""
+        if level is not None and level not in CONSCIOUSNESS_LEVELS:
+            raise ValueError(f"unknown consciousness level {level!r}; expected one of {CONSCIOUSNESS_LEVELS}")
+        self._get(patient_id).consciousness_override = level
+
     def clear(self, patient_id: Optional[str] = None) -> None:
         """Drop events immediately; vitals drift back to baseline on their own time constants."""
         targets = [self._get(patient_id)] if patient_id else self._patients.values()
@@ -327,14 +365,20 @@ class VitalsSimulator:
 
             target = dict(s.baseline)
             still_active = []
+            confused_by_event = False
             for e in s.events:
                 level = _envelope(e, self._clock)
                 if level is None:
                     continue
                 still_active.append(e)
-                for vital, offset in SCENARIOS[e.scenario].offsets.items():
+                spec = SCENARIOS[e.scenario]
+                for vital, offset in spec.offsets.items():
                     target[vital] += offset * e.severity * level
+                if spec.confusion_at is not None and e.severity * level >= spec.confusion_at:
+                    confused_by_event = True
             s.events = still_active
+            if s.on_oxygen and target["spo2Percent"] < 99.5:
+                target["spo2Percent"] += (99.5 - target["spo2Percent"]) * OXYGEN_EFFECT
 
             values: Dict[str, float] = {}
             for vital in VITAL_SIGNS:
@@ -350,7 +394,13 @@ class VitalsSimulator:
                 values[vital] = round(value, d.decimals) if d.decimals else int(round(value))
             # Keep pulse pressure physiological.
             values["diastolicMmHg"] = min(values["diastolicMmHg"], values["systolicMmHg"] - 25)
-            readings.append({"patientId": s.patient.id, "recordedAt": recorded_at, **values})
+            readings.append({
+                "patientId": s.patient.id,
+                "recordedAt": recorded_at,
+                **values,
+                "onOxygen": s.on_oxygen,
+                "consciousness": s.consciousness_override or _consciousness(s.state, confused_by_event),
+            })
         return readings
 
     def stream(self, interval_sec: float = 2, speed: float = 1) -> Iterator[List[Reading]]:
@@ -382,41 +432,6 @@ class VitalsSimulator:
 
 
 # ------------------------------------------------------------------------------------------------
-# Alerts (NEWS2-inspired thresholds - for demo purposes, not clinical use)
-# ------------------------------------------------------------------------------------------------
-
-def vitals_alerts(r: dict) -> List[dict]:
-    """Return [{vital, level: 'warning'|'critical', value, message}] for out-of-range vitals."""
-    alerts: List[dict] = []
-
-    def add(vital: str, level: str, message: str) -> None:
-        alerts.append({"vital": vital, "level": level, "value": r[vital], "message": message})
-
-    spo2, hr, sys_, temp = (r.get(k) for k in ("spo2Percent", "heartRateBpm", "systolicMmHg", "temperatureC"))
-    if spo2 is not None:
-        if spo2 <= 91:
-            add("spo2Percent", "critical", f"SpO2 {spo2}%")
-        elif spo2 <= 93:
-            add("spo2Percent", "warning", f"SpO2 {spo2}%")
-    if hr is not None:
-        if hr <= 40 or hr >= 131:
-            add("heartRateBpm", "critical", f"HR {hr} bpm")
-        elif hr <= 50 or hr >= 111:
-            add("heartRateBpm", "warning", f"HR {hr} bpm")
-    if sys_ is not None:
-        if sys_ <= 90 or sys_ >= 220:
-            add("systolicMmHg", "critical", f"SBP {sys_} mmHg")
-        elif sys_ <= 100 or sys_ >= 180:
-            add("systolicMmHg", "warning", f"SBP {sys_} mmHg")
-    if temp is not None:
-        if temp <= 35 or temp >= 39.5:
-            add("temperatureC", "critical", f"Temp {temp} °C")
-        elif temp >= 38.1:
-            add("temperatureC", "warning", f"Temp {temp} °C")
-    return alerts
-
-
-# ------------------------------------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------------------------------------
 
@@ -444,13 +459,29 @@ def _derive_baseline(p: SimPatient, rng: random.Random, now: float) -> Vitals:
     # Ignore Synthea's last temperature - it's often from a sick visit, not a resting baseline.
     temp = 36.8 + jitter(0.25)
 
+    # Kept within 13-18 so normal wander stays in the normal adult range (roughly 12-20).
+    rr = _clamp(last.get("respiratoryRate", 15 + jitter(2)), 13, 18)
+    if _CHRONIC_LUNG.search(text):
+        rr = min(rr + 2, 18)
+
     return {
         "heartRateBpm": hr,
         "systolicMmHg": sys_,
         "diastolicMmHg": min(dia, sys_ - 38),
         "spo2Percent": spo2,
         "temperatureC": temp,
+        "respiratoryRate": rr,
     }
+
+
+def _consciousness(state: Vitals, confused_by_event: bool) -> str:
+    """ACVPU from the underlying (noise-free) physiology, so it doesn't flicker on noisy readings."""
+    spo2, sbp, temp = state["spo2Percent"], state["systolicMmHg"], state["temperatureC"]
+    if spo2 < 75 or sbp < 65:
+        return "V"
+    if confused_by_event or spo2 < 84 or sbp < 78 or temp >= 40.5:
+        return "C"
+    return "A"
 
 
 def _scenario_weights(p: SimPatient) -> Dict[str, float]:

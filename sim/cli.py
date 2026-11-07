@@ -11,6 +11,8 @@ Server endpoints (CORS open, for local dev only):
     GET  /stream                       Server-Sent Events: one `data: [readings...]` per tick
     POST /patients/<id>/trigger        body: {"scenario": "sepsis", "severity"?: 1, "holdMin"?: 30, "untilResolved"?: true}
     POST /patients/<id>/resolve        body (optional): {"scenario": "sepsis"}
+    POST /patients/<id>/oxygen         body: {"on": true}
+    POST /patients/<id>/consciousness  body: {"level": "C"}   ("A"|"C"|"V"|"P"|"U", or null = automatic)
 
 From the browser:
     const es = new EventSource('http://127.0.0.1:8765/stream')
@@ -36,7 +38,6 @@ from vitals_sim import (  # noqa: E402
     SCENARIOS,
     VitalsSimulator,
     load_synthea_patients,
-    vitals_alerts,
 )
 
 
@@ -52,18 +53,20 @@ def cmd_demo(args: argparse.Namespace) -> None:
     if len(patients) > 1:
         sim.trigger(patients[1].id, "hypoxia", hold_min=40)
 
-    print(f"{'time':<6}{'room':<5}{'patient':<22}{'HR':<5}{'BP':<9}{'SpO2':<6}{'Temp':<6}alerts")
-    for _ in range(0, args.hours * 60 + 1, 15):
+    print(f"{'time':<6}{'room':<5}{'patient':<22}{'HR':<5}{'BP':<9}{'RR':<4}{'SpO2':<9}{'Temp':<6}{'AVPU':<6}scenarios")
+    for block in range(args.hours * 4 + 1):
+        if block == 1 and len(patients) > 1:
+            sim.set_oxygen(patients[1].id, True)  # nurse puts the hypoxic patient on oxygen at 08:15
         for _ in range(15 * 60 // 5):
             readings = sim.step(5)
         clock = datetime.fromtimestamp(sim.now, timezone.utc).strftime("%H:%M")
         for i, (p, r) in enumerate(zip(patients, readings)):
-            alerts = ", ".join(("!! " if a["level"] == "critical" else "") + a["message"] for a in vitals_alerts(r))
             events = ",".join(e.scenario for e in sim.active_events(p.id))
+            spo2 = f"{r['spo2Percent']}%" + (" O2" if r["onOxygen"] else "")
             print(
                 f"{clock if i == 0 else '':<6}{p.room:<5}{p.display_name:<22}{r['heartRateBpm']:<5}"
-                f"{str(r['systolicMmHg']) + '/' + str(r['diastolicMmHg']):<9}{str(r['spo2Percent']) + '%':<6}"
-                f"{r['temperatureC']:<6}{alerts}{'  [' + events + ']' if events else ''}"
+                f"{str(r['systolicMmHg']) + '/' + str(r['diastolicMmHg']):<9}{r['respiratoryRate']:<4}{spo2:<9}"
+                f"{r['temperatureC']:<6}{r['consciousness']:<6}{events}"
             )
         print()
 
@@ -155,7 +158,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/patients":
             with self.server.lock:
                 body = [
-                    {**p.to_json(), "baseline": sim.baseline(p.id), "events": [e.to_json() for e in sim.active_events(p.id)]}
+                    {
+                        **p.to_json(),
+                        "baseline": sim.baseline(p.id),
+                        "events": [e.to_json() for e in sim.active_events(p.id)],
+                        "onOxygen": sim.on_oxygen(p.id),
+                        "consciousnessOverride": sim.consciousness_override(p.id),
+                    }
                     for p in sim.patients
                 ]
             self._json(200, body)
@@ -170,7 +179,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
-        m = re.fullmatch(r"/patients/([^/]+)/(trigger|resolve)", self.path.split("?")[0])
+        m = re.fullmatch(r"/patients/([^/]+)/(trigger|resolve|oxygen|consciousness)", self.path.split("?")[0])
         if not m:
             return self._json(404, {"error": "not found"})
         patient_id, action = m.groups()
@@ -178,18 +187,27 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
             if action == "trigger" and "scenario" not in body:
                 return self._json(400, {"error": f"body needs 'scenario', one of {sorted(SCENARIOS)}"})
+            if action == "oxygen" and not isinstance(body.get("on"), bool):
+                return self._json(400, {"error": "body needs 'on': true or false"})
+            if action == "consciousness" and "level" not in body:
+                return self._json(400, {"error": "body needs 'level': one of A, C, V, P, U, or null for automatic"})
+            sim = self.server.sim
             with self.server.lock:
                 if action == "trigger":
-                    event = self.server.sim.trigger(
+                    event = sim.trigger(
                         patient_id,
                         body["scenario"],
                         severity=float(body.get("severity", 1)),
                         hold_min=math.inf if body.get("untilResolved") else body.get("holdMin"),
                     )
-                    self._json(200, event.to_json())
+                    return self._json(200, event.to_json())
+                if action == "resolve":
+                    sim.resolve(patient_id, body.get("scenario"))
+                elif action == "oxygen":
+                    sim.set_oxygen(patient_id, body["on"])
                 else:
-                    self.server.sim.resolve(patient_id, body.get("scenario"))
-                    self._json(200, {"ok": True})
+                    sim.set_consciousness(patient_id, body["level"])
+            self._json(200, {"ok": True})
         except KeyError as e:  # unknown patient id
             self._json(404, {"error": str(e).strip("'\"")})
         except (ValueError, json.JSONDecodeError) as e:

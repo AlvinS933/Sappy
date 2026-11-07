@@ -15,7 +15,13 @@ export interface VitalsReading {
   diastolicMmHg?: number
   spo2Percent?: number
   temperatureC?: number
+  respiratoryRate?: number // breaths/min
+  onOxygen?: boolean // supplemental oxygen (false = room air)
+  consciousness?: Consciousness
 }
+
+/** ACVPU: Alert, new Confusion, responds to Voice, responds to Pain, Unresponsive. */
+export type Consciousness = 'A' | 'C' | 'V' | 'P' | 'U'
 
 export function patientDisplayName(p: Pick<Patient, 'firstName' | 'lastName'>): string {
   return `${p.firstName} ${p.lastName}`
