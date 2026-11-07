@@ -13,3 +13,4 @@ release
 # Synthea
 .cache
 data/synthea
+__pycache__

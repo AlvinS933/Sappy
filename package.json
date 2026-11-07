@@ -19,6 +19,9 @@
     "build:patient": "pnpm --filter patient-desktop build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
-    "data:synthea": "bash scripts/synthea.sh"
+    "data:synthea": "python3 scripts/synthea.py",
+    "sim:demo": "python3 sim/cli.py demo",
+    "sim:serve": "python3 sim/cli.py serve --speed 30",
+    "test:sim": "python3 -m unittest discover sim -v"
   }
 }
