@@ -1,0 +1,23 @@
+{
+  "name": "patient-care-monorepo",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.18.0",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.18.0",
+      "onFail": "download"
+    }
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter nurse-web --filter patient-desktop dev",
+    "dev:nurse": "pnpm --filter nurse-web dev",
+    "dev:patient": "pnpm --filter patient-desktop dev",
+    "build": "pnpm -r build",
+    "build:nurse": "pnpm --filter nurse-web build",
+    "build:patient": "pnpm --filter patient-desktop build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
