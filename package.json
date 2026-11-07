@@ -18,6 +18,7 @@
     "build:nurse": "pnpm --filter nurse-web build",
     "build:patient": "pnpm --filter patient-desktop build",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "ai:setup": "node scripts/ai-setup.mjs"
   }
 }

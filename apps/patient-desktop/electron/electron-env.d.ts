@@ -21,7 +21,8 @@ declare namespace NodeJS {
   }
 }
 
-// Used in Renderer process, expose in `preload.ts`
+// Used in Renderer process, exposed in `preload.ts`
 interface Window {
-  ipcRenderer: import('electron').IpcRenderer
+  ai: { chat(messages: { role: 'user' | 'assistant'; content: string }[]): Promise<string> }
 }
+
