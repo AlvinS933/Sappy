@@ -3,19 +3,19 @@
 and sanity-check the output.
 
 Usage:
-  python3 scripts/synthea.py [-p POPULATION] [-s SEED] [-a AGE_RANGE] [-S STATE] [-c CITY] [-- extra synthea args]
+  python3 server/Synthea_Gen/synthea.py [-p POPULATION] [-s SEED] [-a AGE_RANGE] [-S STATE] [-c CITY] [-- extra synthea args]
 
 Examples:
-  python3 scripts/synthea.py                       # 25 adult patients in Boston, MA, seed 1984
-  python3 scripts/synthea.py -p 100 -s 42          # 100 patients, different seed
-  python3 scripts/synthea.py -- --exporter.years_of_history=2
+  python3 server/Synthea_Gen/synthea.py                       # 25 adult patients in Boston, MA, seed 1984
+  python3 server/Synthea_Gen/synthea.py -p 100 -s 42          # 100 patients, different seed
+  python3 server/Synthea_Gen/synthea.py -- --exporter.years_of_history=2
 
 Output (gitignored):
-  data/synthea/csv/   patients.csv, observations.csv, conditions.csv, medications.csv, ...
-  data/synthea/fhir/  one FHIR R4 Bundle JSON per patient
+  server/data/synthea/csv/   patients.csv, observations.csv, conditions.csv, medications.csv, ...
+  server/data/synthea/fhir/  one FHIR R4 Bundle JSON per patient
 
 Requires Java 17+ and Python 3.9+ (standard library only).
-The Synthea jar is downloaded once to .cache/synthea/. Set SYNTHEA_VERSION to pin another release.
+The Synthea jar is downloaded once to server/.cache/synthea/. Set SYNTHEA_VERSION to pin another release.
 """
 
 from __future__ import annotations
