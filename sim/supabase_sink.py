@@ -18,6 +18,8 @@ standard library alone.
 from __future__ import annotations
 
 import os
+import sys
+import threading
 from typing import Any, Dict, List, Optional
 
 from vitals_sim import VitalsSimulator
@@ -37,37 +39,15 @@ VITALS_COLUMNS = {
     "consciousness": "consciousness",
 }
 
+# Don't have PostgREST echo rows back - nothing reads them (postgrest's ReturnMethod is a str enum).
+RETURN_MINIMAL = "minimal"
+
+# Seconds before a Supabase request gives up (the client's default is 120 s).
+REQUEST_TIMEOUT_SEC = 5.0
+
 
 def vitals_row(reading: Dict[str, Any]) -> Dict[str, Any]:
     return {column: reading.get(key) for key, column in VITALS_COLUMNS.items()}
-
-
-def patient_rows(sim: VitalsSimulator) -> List[dict]:
-    return [
-        {
-            "id": p.id,
-            "age_band": p.age_band,
-            "gender": p.gender,
-            "conditions": p.conditions,
-            "medications": p.medications,
-        }
-        for p in sim.patients
-    ]
-
-
-def encounter_rows(sim: VitalsSimulator) -> List[dict]:
-    rows = []
-    for p in sim.patients:
-        a = sim.admission(p.id)
-        rows.append({
-            "id": a.encounter_id,
-            "patient_id": p.id,
-            "status": "in-progress",
-            "class": "IMP",
-            "location_id": a.location_id,
-            "bed_label": a.bed_label,
-        })
-    return rows
 
 
 class SupabaseSink:
@@ -84,13 +64,15 @@ class SupabaseSink:
         if not url or not key:
             return None
         try:
-            from supabase import create_client
+            import httpx
+            from supabase import ClientOptions, create_client
         except ImportError as e:
             raise RuntimeError(
                 "SUPABASE_URL is set but the supabase package isn't installed - "
                 "use the venv: source .venv/bin/activate && pip install -r requirements.txt"
             ) from e
-        return cls(create_client(url, key))
+        options = ClientOptions(httpx_client=httpx.Client(timeout=REQUEST_TIMEOUT_SEC))
+        return cls(create_client(url, key, options=options))
 
     def reset(self) -> None:
         """Delete all vitals and alerts (a fresh demo run). Patients/encounters are upserted anyway."""
@@ -100,13 +82,14 @@ class SupabaseSink:
     def admit(self, sim: VitalsSimulator) -> None:
         """Make the tables match this run's ward: delete other patients (cascades to their encounters,
         vitals and alerts), upsert the ward's patients + encounters, finish their older encounters."""
-        patients = patient_rows(sim)
-        self.client.table("patients").delete().not_.in_("id", [p["id"] for p in patients]).execute()
-        self.client.table("patients").upsert(patients, on_conflict="id").execute()
-        encounters = encounter_rows(sim)
-        self.client.table("encounters").upsert(encounters, on_conflict="id").execute()
+        patients = [p.to_row() for p in sim.patients]
+        encounters = [sim.admission(p.id).to_row(p.id) for p in sim.patients]
+        table = self.client.table
+        table("patients").delete().not_.in_("id", [p["id"] for p in patients]).execute()
+        table("patients").upsert(patients, on_conflict="id", returning=RETURN_MINIMAL).execute()
+        table("encounters").upsert(encounters, on_conflict="id", returning=RETURN_MINIMAL).execute()
         (
-            self.client.table("encounters")
+            table("encounters")
             .update({"status": "finished"})
             .not_.in_("id", [e["id"] for e in encounters])
             .eq("status", "in-progress")
@@ -116,4 +99,52 @@ class SupabaseSink:
     def write(self, readings: List[Dict[str, Any]]) -> None:
         """Upsert each patient's latest reading: update their row, or insert it if it doesn't exist."""
         if readings:
-            self.client.table("vitals").upsert([vitals_row(r) for r in readings], on_conflict="patient_id").execute()
+            rows = [vitals_row(r) for r in readings]
+            self.client.table("vitals").upsert(rows, on_conflict="patient_id", returning=RETURN_MINIMAL).execute()
+
+
+class BackgroundWriter:
+    """Runs sink.write() on its own thread so a slow or stalled network never holds up the ticker.
+
+    Only the newest batch is kept: each write overwrites every patient's row anyway, so if Supabase
+    falls behind, older batches are dropped instead of queueing up.
+    """
+
+    def __init__(self, sink: Any) -> None:
+        self.sink = sink
+        self.failures = 0  # consecutive failed writes
+        self._cond = threading.Condition()
+        self._pending: Optional[list] = None
+        self._closed = False
+        self._thread = threading.Thread(target=self._loop, name="supabase-writer", daemon=True)
+        self._thread.start()
+
+    def submit(self, readings: list) -> None:
+        with self._cond:
+            self._pending = readings
+            self._cond.notify()
+
+    def close(self) -> None:
+        with self._cond:
+            self._closed = True
+            self._cond.notify()
+
+    def _loop(self) -> None:
+        while True:
+            with self._cond:
+                self._cond.wait_for(lambda: self._pending is not None or self._closed)
+                if self._pending is None:  # closed, nothing left to write
+                    return
+                batch, self._pending = self._pending, None
+            self._write(batch)
+
+    def _write(self, batch: list) -> None:
+        try:
+            self.sink.write(batch)
+            if self.failures:
+                print(f"supabase: writes recovered after {self.failures} failures", flush=True)
+            self.failures = 0
+        except Exception as e:  # keep going; the SSE stream still works without Supabase
+            self.failures += 1
+            if self.failures == 1 or self.failures % 30 == 0:
+                print(f"supabase: write failed ({self.failures}x): {e}", file=sys.stderr, flush=True)

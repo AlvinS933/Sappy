@@ -34,44 +34,14 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-def load_dotenv(path: Path) -> None:
-    """Minimal .env reader (stdlib only): KEY=VALUE lines, # comments, optional quotes/`export`.
-    Variables already set in the real environment win over the file."""
-    if not path.is_file():
-        return
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        if key.startswith("export "):
-            key = key[len("export "):].strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        elif " #" in value:  # inline comment on an unquoted value
-            value = value.split(" #", 1)[0].rstrip()
-        os.environ.setdefault(key, value)
+sys.path.insert(0, str(ROOT))
+from pylib.env import load_dotenv  # noqa: E402
+from pylib.loinc import VITAL_LOINC  # noqa: E402
 
-
-load_dotenv(ROOT / ".env")
-SYNTHEA_VERSION = os.environ.get("SYNTHEA_VERSION", "v4.0.0")
-CACHE_DIR = ROOT / "tools"
-JAR = CACHE_DIR / f"synthea-with-dependencies-{SYNTHEA_VERSION}.jar"
+TOOLS_DIR = ROOT / "tools"
 OUT_DIR = ROOT / "data" / "raw"
 
 REQUIRED_CSVS = ("patients.csv", "observations.csv", "conditions.csv", "encounters.csv", "medications.csv")
-
-# LOINC codes that map to VitalsReading in packages/shared
-VITAL_CODES = {
-    "8867-4": "heartRateBpm",
-    "8480-6": "systolicMmHg",
-    "8462-4": "diastolicMmHg",
-    "2708-6": "spo2Percent",
-    "59408-5": "spo2Percent",
-    "8310-5": "temperatureC",
-}
 
 
 def die(msg: str) -> None:
@@ -89,13 +59,15 @@ def check_java() -> None:
         die(f"Synthea needs Java 17+, found {major or 'unknown'}.")
 
 
-def download_synthea() -> None:
-    if JAR.exists() and JAR.stat().st_size > 0:
-        return
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    url = f"https://github.com/synthetichealth/synthea/releases/download/{SYNTHEA_VERSION}/synthea-with-dependencies.jar"
-    print(f"==> Downloading Synthea {SYNTHEA_VERSION}")
-    part = JAR.with_suffix(".jar.part")
+def download_synthea(version: str) -> Path:
+    """Return the cached jar for `version`, downloading it to tools/ the first time."""
+    jar = TOOLS_DIR / f"synthea-with-dependencies-{version}.jar"
+    if jar.exists() and jar.stat().st_size > 0:
+        return jar
+    TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+    url = f"https://github.com/synthetichealth/synthea/releases/download/{version}/synthea-with-dependencies.jar"
+    print(f"==> Downloading Synthea {version}")
+    part = jar.with_suffix(".jar.part")
     with urllib.request.urlopen(url) as resp, open(part, "wb") as f:
         total = int(resp.headers.get("Content-Length") or 0)
         done = 0
@@ -106,16 +78,17 @@ def download_synthea() -> None:
                 print(f"\r    {done / total:6.1%} of {total / 1e6:.0f} MB", end="", file=sys.stderr)
     if sys.stderr.isatty():
         print(file=sys.stderr)
-    part.rename(JAR)
+    part.rename(jar)
+    return jar
 
 
-def generate(args: argparse.Namespace) -> None:
+def generate(jar: Path, args: argparse.Namespace) -> None:
     print(f"==> Generating {args.population} patients (seed {args.seed}, ages {args.ages}, {args.city}, {args.state})")
     shutil.rmtree(OUT_DIR, ignore_errors=True)
     OUT_DIR.mkdir(parents=True)
     log = OUT_DIR / "synthea.log"
     cmd = [
-        "java", "-jar", str(JAR),
+        "java", "-jar", str(jar),
         "-p", str(args.population),
         "-s", str(args.seed),
         "-cs", str(args.seed),
@@ -157,20 +130,18 @@ def verify_and_summarise() -> None:
     with open(csv_dir / "observations.csv", newline="") as f:
         for row in csv.DictReader(f):
             total += 1
-            if row["CODE"] in VITAL_CODES:
-                counts[VITAL_CODES[row["CODE"]]] += 1
+            if row["CODE"] in VITAL_LOINC:
+                counts[VITAL_LOINC[row["CODE"]]] += 1
 
     print(f"  patients:      {len(patients)}")
     print(f"  observations:  {total}")
-    for k in ("heartRateBpm", "systolicMmHg", "diastolicMmHg", "spo2Percent", "temperatureC"):
-        print(f"    {k:<13} {counts[k]}")
-    print("  sample:")
-    for p in patients[:3]:
-        print(f"    {p['Id']}  {p['FIRST']} {p['LAST']}  born {p['BIRTHDATE']}  {p['GENDER']}")
+    for vital in dict.fromkeys(VITAL_LOINC.values()):  # unique, in map order
+        print(f"    {vital:<16} {counts[vital]}")
     print(f"  FHIR bundles:  {fhir_count}")
 
 
 def main(argv=None) -> None:
+    load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(
         description="Generate synthetic patients with Synthea.",
         epilog="Anything after -- is passed straight to Synthea, e.g. -- --exporter.years_of_history=2",
@@ -181,14 +152,15 @@ def main(argv=None) -> None:
     parser.add_argument("-a", "--ages", default=env("SYNTHEA_AGES", "18-90"), help="age range, e.g. 18-90")
     parser.add_argument("-S", "--state", default=env("SYNTHEA_STATE", "Massachusetts"))
     parser.add_argument("-c", "--city", default=env("SYNTHEA_CITY", "Boston"))
+    parser.add_argument("--version", default=env("SYNTHEA_VERSION", "v4.0.0"), help="Synthea release tag")
     parser.add_argument("extra", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.extra[:1] == ["--"]:
         args.extra = args.extra[1:]
 
     check_java()
-    download_synthea()
-    generate(args)
+    jar = download_synthea(args.version)
+    generate(jar, args)
     verify_and_summarise()
     print(f"==> Done. Data in {OUT_DIR.relative_to(ROOT)}/")
 

@@ -8,9 +8,13 @@
 
 import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
 import {
+  encounterFromRow,
+  patientFromRow,
   vitalsFromRow,
   type AlertRow,
+  type Encounter,
   type EncounterRow,
+  type Patient,
   type PatientRow,
   type VitalsReading,
   type VitalsRow,
@@ -28,15 +32,18 @@ if (!url || !publishableKey) {
 
 export const supabase = createClient(url, publishableKey)
 
-/** Patients with their current in-progress encounter (bed). */
-export async function fetchWard(): Promise<{ patients: PatientRow[]; encounters: EncounterRow[] }> {
+/** Patients and their current in-progress encounters (bed = `encounter.location.display`). */
+export async function fetchWard(): Promise<{ patients: Patient[]; encounters: Encounter[] }> {
   const [patients, encounters] = await Promise.all([
     supabase.from('patients').select('*'),
     supabase.from('encounters').select('*').eq('status', 'in-progress'),
   ])
   if (patients.error) throw patients.error
   if (encounters.error) throw encounters.error
-  return { patients: patients.data as PatientRow[], encounters: encounters.data as EncounterRow[] }
+  return {
+    patients: (patients.data as PatientRow[]).map(patientFromRow),
+    encounters: (encounters.data as EncounterRow[]).map(encounterFromRow),
+  }
 }
 
 /** Each patient's latest reading (the `vitals` table holds one row per patient). */
@@ -55,13 +62,14 @@ export function subscribeToWard(handlers: {
   onVitals?: (reading: VitalsReading) => void
   onAlert?: (alert: AlertRow) => void
 }): () => void {
+  // INSERT/UPDATE only: a DELETE carries no new row.
   const channel: RealtimeChannel = supabase
     .channel('ward')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'vitals' }, (payload) => {
       if (payload.eventType !== 'DELETE') handlers.onVitals?.(vitalsFromRow(payload.new as VitalsRow))
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, (payload) => {
-      if (payload.new && 'id' in payload.new) handlers.onAlert?.(payload.new as AlertRow)
+      if (payload.eventType !== 'DELETE') handlers.onAlert?.(payload.new as AlertRow)
     })
     .subscribe()
   return () => {

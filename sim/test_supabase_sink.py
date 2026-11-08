@@ -11,25 +11,16 @@ import os
 import sys
 import threading
 import unittest
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from supabase_sink import VITALS_COLUMNS, SupabaseSink, encounter_rows, patient_rows, vitals_row  # noqa: E402
-from vitals_sim import SimPatient, VitalsSimulator  # noqa: E402
+from supabase_sink import VITALS_COLUMNS, BackgroundWriter, SupabaseSink, vitals_row  # noqa: E402
+from _testutil import quiet_sim, request, start_server, stop_server, ward  # noqa: E402
 
-START = 1767254400.0
-
-
-def ward(n: int = 2) -> list:
-    return [SimPatient(id=f"p{i}", age_band="60-69", gender="female", conditions=["Asthma"]) for i in range(n)]
-
-
-def quiet_sim(n: int = 2) -> VitalsSimulator:
-    return VitalsSimulator(ward(n), start_time=START, event_rate_per_hour=0)
+MINIMAL = {"returning": "minimal"}
 
 
 class FakeQuery:
@@ -43,9 +34,6 @@ class FakeQuery:
     def _op(self, op, data=None, **kwargs):
         self.call.update(op=op, data=data, kwargs=kwargs)
         return self
-
-    def insert(self, data, **kw):
-        return self._op("insert", data, **kw)
 
     def upsert(self, data, **kw):
         return self._op("upsert", data, **kw)
@@ -89,7 +77,7 @@ class FakeClient:
 
 class RowMappingTests(unittest.TestCase):
     def test_vitals_row_matches_reading(self):
-        sim = quiet_sim()
+        sim = quiet_sim(ward(2))
         (r, _) = sim.step(5)
         row = vitals_row(r)
         self.assertEqual(set(row), set(VITALS_COLUMNS.values()))
@@ -100,13 +88,13 @@ class RowMappingTests(unittest.TestCase):
         self.assertEqual(row["consciousness"], "A")
 
     def test_every_reading_key_is_mapped(self):
-        (r, _) = quiet_sim().step(5)
+        (r, _) = quiet_sim(ward(2)).step(5)
         self.assertEqual(set(r), set(VITALS_COLUMNS))
 
     def test_patient_and_encounter_rows_have_no_identifying_fields(self):
-        sim = quiet_sim()
-        self.assertEqual(set(patient_rows(sim)[0]), {"id", "age_band", "gender", "conditions", "medications"})
-        enc = encounter_rows(sim)[1]
+        sim = quiet_sim(ward(2))
+        self.assertEqual(set(sim.patients[0].to_row()), {"id", "age_band", "gender", "conditions", "medications"})
+        enc = sim.admission("p1").to_row("p1")
         self.assertEqual(
             (enc["patient_id"], enc["status"], enc["class"], enc["bed_label"]), ("p1", "in-progress", "IMP", "4W-02")
         )
@@ -116,7 +104,7 @@ class SinkTests(unittest.TestCase):
     def setUp(self):
         self.client = FakeClient()
         self.sink = SupabaseSink(self.client)
-        self.sim = quiet_sim()
+        self.sim = quiet_sim(ward(2))
 
     def test_admit_prunes_other_patients_upserts_then_finishes_old_encounters(self):
         self.sink.admit(self.sim)
@@ -124,7 +112,7 @@ class SinkTests(unittest.TestCase):
         self.assertEqual(ops, [("patients", "delete"), ("patients", "upsert"), ("encounters", "upsert"),
                                ("encounters", "update")])
         self.assertEqual(self.client.log[0]["filters"], [("not.in", "id", ["p0", "p1"])])
-        self.assertEqual(self.client.log[1]["kwargs"], {"on_conflict": "id"})
+        self.assertEqual(self.client.log[1]["kwargs"], {"on_conflict": "id", **MINIMAL})
         finish = self.client.log[3]
         ids = [self.sim.admission(f"p{i}").encounter_id for i in range(2)]
         self.assertEqual(finish["data"], {"status": "finished"})
@@ -134,7 +122,7 @@ class SinkTests(unittest.TestCase):
         self.sink.write(self.sim.step(5))
         (call,) = self.client.log
         self.assertEqual((call["table"], call["op"], len(call["data"])), ("vitals", "upsert", 2))
-        self.assertEqual(call["kwargs"], {"on_conflict": "patient_id"})
+        self.assertEqual(call["kwargs"], {"on_conflict": "patient_id", **MINIMAL})
         self.sink.write([])
         self.assertEqual(len(self.client.log), 1)  # empty batch: no request
 
@@ -156,25 +144,38 @@ class SinkTests(unittest.TestCase):
         self.assertNotIn("sepsis", json.dumps([c["data"] for c in self.client.log]))
 
 
+class BackgroundWriterTests(unittest.TestCase):
+    def test_keeps_only_the_newest_batch_while_a_write_is_in_flight(self):
+        import time
+        started, release, written = threading.Event(), threading.Event(), []
+
+        class SlowSink:
+            def write(self, batch):
+                started.set()
+                release.wait(5)
+                written.append(batch)
+
+        writer = BackgroundWriter(SlowSink())
+        self.addCleanup(writer.close)
+        writer.submit([1])
+        started.wait(5)  # first write is blocked on the "network"
+        for batch in ([2], [3], [4]):
+            writer.submit(batch)
+        release.set()
+        deadline = time.time() + 3
+        while len(written) < 2 and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(written, [[1], [4]])  # [2] and [3] were superseded, never sent
+
+
 class ServerSinkTests(unittest.TestCase):
     def start(self, sink=None, token=""):
-        from cli import SimServer
-
-        server = SimServer(("127.0.0.1", 0), quiet_sim(), interval_sec=0.05, speed=1, sink=sink, control_token=token)
-        server.start_ticking()
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        self.addCleanup(server.server_close)
-        self.addCleanup(server.shutdown)
-        return server, f"http://127.0.0.1:{server.server_address[1]}"
+        server, base = start_server(quiet_sim(ward(2)), sink=sink, control_token=token)
+        self.addCleanup(stop_server, server)
+        return server, base
 
     def request(self, url, body=None, headers=None):
-        req = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json", **(headers or {})})
-        try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                return resp.status, json.loads(resp.read())
-        except urllib.error.HTTPError as e:
-            return e.code, json.loads(e.read())
+        return request(url, body, headers)
 
     def test_ticks_written_to_sink_and_health_reports_it(self):
         client = FakeClient()
@@ -197,7 +198,7 @@ class ServerSinkTests(unittest.TestCase):
             first = server.seq
             time.sleep(0.3)
         self.assertGreater(server.seq, first + 2)
-        self.assertGreater(server.sink_failures, 0)
+        self.assertGreater(server.writer.failures, 0)
 
     def test_control_token_required_for_post(self):
         _, base = self.start(token="s3cret")
@@ -269,7 +270,7 @@ class RealClientTests(unittest.TestCase):
             self.sink = SupabaseSink.from_env()
 
     def test_requests_sent_to_postgrest(self):
-        sim = quiet_sim()
+        sim = quiet_sim(ward(2))
         self.sink.reset()
         self.sink.admit(sim)
         self.sink.write(sim.step(5))
@@ -293,7 +294,7 @@ class RealClientTests(unittest.TestCase):
         self.assertTrue(all(r["auth"].startswith("Bearer ") for r in self.requests))
 
     def test_repeated_ticks_update_one_row_per_patient(self):
-        sim = quiet_sim(2)
+        sim = quiet_sim(ward(2))
         self.sink.admit(sim)
         for _ in range(10):
             last = sim.step(5)

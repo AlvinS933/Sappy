@@ -24,53 +24,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from vitals_sim import (  # noqa: E402
     CONSCIOUSNESS_LEVELS,
     SCENARIOS,
+    VITAL_LIMITS,
     VITAL_SIGNS,
     ActiveEvent,
-    SimPatient,
-    VitalsSimulator,
     _consciousness,
     _envelope,
     _scenario_weights,
     load_clean_patients,
 )
+from _testutil import make_patient, quiet_sim, run  # noqa: E402
 
-START = 1767254400.0  # 2026-01-01T08:00:00Z
 ISO_Z = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 
-# Hard limits the simulator clamps to (see _DYNAMICS in vitals_sim.py).
-LIMITS = {
-    "heartRateBpm": (30, 200),
-    "systolicMmHg": (60, 240),
-    "diastolicMmHg": (30, 140),
-    "spo2Percent": (70, 100),
-    "temperatureC": (34, 42),
-    "respiratoryRate": (6, 50),
-}
+# Hard limits the simulator clamps every reading to.
+LIMITS = VITAL_LIMITS
 INT_VITALS = ("heartRateBpm", "systolicMmHg", "diastolicMmHg", "spo2Percent", "respiratoryRate")
 # Every input NEWS2 scores. (diastolicMmHg is in the reading but NEWS2 doesn't use it.)
 NEWS2_KEYS = ("respiratoryRate", "spo2Percent", "onOxygen", "systolicMmHg", "heartRateBpm",
               "consciousness", "temperatureC")
-
-
-def make_patient(**overrides) -> SimPatient:
-    fields = dict(
-        id="p1", age_band="40-49", gender="female",
-        conditions=[], last_vitals={"heartRateBpm": 70, "systolicMmHg": 120, "diastolicMmHg": 78},
-    )
-    fields.update(overrides)
-    return SimPatient(**fields)
-
-
-def quiet_sim(patients, seed: int = 1984) -> VitalsSimulator:
-    """Simulator with random events off, so only explicitly triggered scenarios run."""
-    return VitalsSimulator(patients, seed=seed, start_time=START, event_rate_per_hour=0)
-
-
-def run(sim: VitalsSimulator, minutes: float, dt: float = 5) -> list:
-    out = []
-    for _ in range(int(minutes * 60 / dt)):
-        out.extend(sim.step(dt))
-    return out
 
 
 # ------------------------------------------------------------------------------------------------
@@ -130,10 +101,8 @@ class ReadingShapeTests(unittest.TestCase):
     def test_patient_json_shape(self):
         p = make_patient(conditions=["Hypertension"])
         j = p.to_json()
-        for key in ("id", "ageBand", "gender", "conditions", "medications", "lastVitals"):
-            self.assertIn(key, j)
-        for key in ("firstName", "lastName", "birthDate", "room"):  # privacy: never in patient JSON
-            self.assertNotIn(key, j)
+        # Exact key set: nothing identifying (names, birthDate, room) can sneak in.
+        self.assertEqual(set(j), {"id", "ageBand", "gender", "conditions", "medications", "lastVitals"})
         self.assertIsInstance(j["conditions"], list)
         self.assertIn(j["gender"], ("male", "female", "other", "unknown"))
 

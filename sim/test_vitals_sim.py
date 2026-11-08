@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import math
 import statistics
+import json
 import sys
-import threading
 import unittest
 import urllib.request
 from pathlib import Path
@@ -17,32 +16,15 @@ from vitals_sim import (  # noqa: E402
     DEMO_TICK_MIN,
     DEMO_WARD,
     VITAL_SIGNS,
-    SimPatient,
     VitalsSimulator,
     load_clean_patients,
     schedule_demo,
     select_ward,
 )
+from _testutil import START, make_patient, request, run, start_server, stop_server, ward  # noqa: E402
 
-START = 1767254400.0  # 2026-01-01T08:00:00Z
-
-HEALTHY = SimPatient(
-    id="healthy", age_band="40-49", gender="female",
-    conditions=[], last_vitals={"heartRateBpm": 70, "systolicMmHg": 120, "diastolicMmHg": 78},
-)
+HEALTHY = make_patient(id="healthy")
 HAS_CLEAN_DATA = any(DEFAULT_CLEAN_DIR.glob("*.json"))
-
-
-def ward(n: int) -> list:
-    return [SimPatient(**{**HEALTHY.__dict__, "id": f"p{i}"}) for i in range(n)]
-
-
-def run(sim: VitalsSimulator, minutes: float) -> list:
-    """Run `minutes` of sim time in 5 s steps and return every reading."""
-    out = []
-    for _ in range(int(minutes * 60 / 5)):
-        out.extend(sim.step(5))
-    return out
 
 
 def mean(readings: list, key: str) -> float:
@@ -132,7 +114,7 @@ class SimulatorTests(unittest.TestCase):
         self.assertEqual(sim.active_events("healthy"), [])
 
     def test_random_events_occur(self):
-        patients = [SimPatient(**{**HEALTHY.__dict__, "id": f"p{i}"}) for i in range(20)]
+        patients = ward(20)
         sim = VitalsSimulator(patients, start_time=START, event_rate_per_hour=0.5)
         seen = set()
         for _ in range(4 * 3600 // 5):
@@ -205,7 +187,7 @@ class AdmissionTests(unittest.TestCase):
 
 class WardTests(unittest.TestCase):
     def test_ward_is_five_patients_in_bed_order(self):
-        patients = [SimPatient(**{**HEALTHY.__dict__, "id": i}) for i in reversed(DEMO_WARD)] + ward(3)
+        patients = [make_patient(id=i) for i in reversed(DEMO_WARD)] + ward(3)
         chosen, found = select_ward(patients)
         self.assertTrue(found)
         self.assertEqual([p.id for p in chosen], list(DEMO_WARD))
@@ -272,30 +254,14 @@ class CleanLoaderTests(unittest.TestCase):
 class ServerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from cli import SimServer
-
-        sim = VitalsSimulator(ward(3), start_time=START, event_rate_per_hour=0)
-        cls.server = SimServer(("127.0.0.1", 0), sim, interval_sec=0.05, speed=1)
-        cls.server.start_ticking()
-        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
-        cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
+        cls.server, cls.base = start_server(VitalsSimulator(ward(3), start_time=START, event_rate_per_hour=0))
 
     @classmethod
     def tearDownClass(cls):
-        cls.server.shutdown()
-        cls.server.server_close()
+        stop_server(cls.server)
 
     def request(self, path, body=None):
-        req = urllib.request.Request(
-            self.base + path,
-            data=None if body is None else json.dumps(body).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                return resp.status, json.loads(resp.read())
-        except urllib.error.HTTPError as e:
-            return e.code, json.loads(e.read())
+        return request(self.base + path, body)
 
     def test_patients_and_vitals(self):
         status, patients = self.request("/patients")
