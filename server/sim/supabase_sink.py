@@ -1,6 +1,6 @@
-"""Write simulator output to Supabase (tables in supabase/migrations/).
+"""Write simulator output to Supabase (tables in server/supabase/migrations/).
 
-Used by `python3 sim/cli.py serve` when SUPABASE_URL and SUPABASE_SECRET_KEY are set
+Used by `python3 server/sim/cli.py serve` when SUPABASE_URL and SUPABASE_SECRET_KEY are set
 (SUPABASE_SERVICE_ROLE_KEY, the legacy name, also works):
   - on start: remove patients that aren't on this run's ward (so the tables hold exactly the ward),
     upsert the ward's patients + in-progress encounters, finish encounters from older runs

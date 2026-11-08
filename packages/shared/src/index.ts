@@ -37,7 +37,7 @@ export interface VitalsReading {
 export type Consciousness = 'A' | 'C' | 'V' | 'P' | 'U'
 
 // ---------------------------------------------------------------------------------------------
-// Supabase rows (snake_case, see supabase/migrations/). Keep in sync with the SQL, or replace with
+// Supabase rows (snake_case, see server/supabase/migrations/). Keep in sync with the SQL, or replace with
 // `supabase gen types typescript` output.
 // ---------------------------------------------------------------------------------------------
 

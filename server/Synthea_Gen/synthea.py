@@ -3,19 +3,19 @@
 and sanity-check the output.
 
 Usage:
-  python3 Synthea_Gen/synthea.py [-p POPULATION] [-s SEED] [-a AGE_RANGE] [-S STATE] [-c CITY] [-- extra synthea args]
+  python3 server/Synthea_Gen/synthea.py [-p POPULATION] [-s SEED] [-a AGE_RANGE] [-S STATE] [-c CITY] [-- extra synthea args]
 
 Examples:
-  python3 Synthea_Gen/synthea.py                       # 25 adult patients in Boston, MA, seed 1984
-  python3 Synthea_Gen/synthea.py -p 100 -s 42          # 100 patients, different seed
-  python3 Synthea_Gen/synthea.py -- --exporter.years_of_history=2
+  python3 server/Synthea_Gen/synthea.py                       # 25 adult patients in Boston, MA, seed 1984
+  python3 server/Synthea_Gen/synthea.py -p 100 -s 42          # 100 patients, different seed
+  python3 server/Synthea_Gen/synthea.py -- --exporter.years_of_history=2
 
 Output (gitignored - raw data contains names/addresses, never commit it):
-  data/raw/csv/   patients.csv, observations.csv, conditions.csv, medications.csv, ...
-  data/raw/fhir/  one FHIR R4 Bundle JSON per patient
+  server/data/raw/csv/   patients.csv, observations.csv, conditions.csv, medications.csv, ...
+  server/data/raw/fhir/  one FHIR R4 Bundle JSON per patient
 
 Requires Java 17+ and Python 3.9+ (standard library only).
-The Synthea jar is downloaded once to tools/ (gitignored).
+The Synthea jar is downloaded once to server/tools/ (gitignored).
 Defaults come from .env (see .env_sample): SYNTHEA_VERSION, SYNTHEA_SEED, SYNTHEA_POPULATION,
 SYNTHEA_AGES, SYNTHEA_STATE, SYNTHEA_CITY. Command-line flags override them.
 """
@@ -33,13 +33,14 @@ import urllib.request
 from collections import Counter
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+SERVER_DIR = Path(__file__).resolve().parent.parent  # server/
+REPO_ROOT = SERVER_DIR.parent
+sys.path.insert(0, str(SERVER_DIR))
 from pylib.env import load_dotenv  # noqa: E402
 from pylib.loinc import VITAL_LOINC  # noqa: E402
 
-TOOLS_DIR = ROOT / "tools"
-OUT_DIR = ROOT / "data" / "raw"
+TOOLS_DIR = SERVER_DIR / "tools"
+OUT_DIR = SERVER_DIR / "data" / "raw"
 
 REQUIRED_CSVS = ("patients.csv", "observations.csv", "conditions.csv", "encounters.csv", "medications.csv")
 
@@ -60,7 +61,7 @@ def check_java() -> None:
 
 
 def download_synthea(version: str) -> Path:
-    """Return the cached jar for `version`, downloading it to tools/ the first time."""
+    """Return the cached jar for `version`, downloading it to server/tools/ the first time."""
     jar = TOOLS_DIR / f"synthea-with-dependencies-{version}.jar"
     if jar.exists() and jar.stat().st_size > 0:
         return jar
@@ -141,7 +142,7 @@ def verify_and_summarise() -> None:
 
 
 def main(argv=None) -> None:
-    load_dotenv(ROOT / ".env")
+    load_dotenv(REPO_ROOT / ".env")
     parser = argparse.ArgumentParser(
         description="Generate synthetic patients with Synthea.",
         epilog="Anything after -- is passed straight to Synthea, e.g. -- --exporter.years_of_history=2",
@@ -162,7 +163,7 @@ def main(argv=None) -> None:
     jar = download_synthea(args.version)
     generate(jar, args)
     verify_and_summarise()
-    print(f"==> Done. Data in {OUT_DIR.relative_to(ROOT)}/")
+    print(f"==> Done. Data in {OUT_DIR.relative_to(REPO_ROOT)}/")
 
 
 if __name__ == "__main__":

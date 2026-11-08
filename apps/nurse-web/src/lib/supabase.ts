@@ -1,7 +1,7 @@
 // Supabase browser client for the nurse dashboard.
 //
 // Uses the publishable key: data is only readable after sign-in (Row Level Security, see
-// supabase/migrations/). Never put the secret key in this app.
+// server/supabase/migrations/). Never put the secret key in this app.
 //
 // Env (apps/nurse-web/.env locally, Vercel project settings in production):
 //   VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY

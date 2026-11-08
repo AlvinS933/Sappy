@@ -1,4 +1,4 @@
-"""Run: python3 -m unittest discover Synthea_Gen -v"""
+"""Run: python3 -m unittest discover server/Synthea_Gen -v"""
 
 from __future__ import annotations
 
@@ -178,7 +178,7 @@ class RunTests(unittest.TestCase):
 
 
 @unittest.skipUnless(any(t.DEFAULT_RAW.glob("*.json")) and any(t.DEFAULT_OUT.glob("*.json")),
-                     "needs data/raw and data/clean - run synthea.py and transform.py")
+                     "needs server/data/raw and server/data/clean - run synthea.py and transform.py")
 class RealDataTests(unittest.TestCase):
     def test_every_clean_file_is_scrubbed_against_its_raw_patient(self):
         raw_patients = {}

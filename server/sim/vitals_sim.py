@@ -1,6 +1,6 @@
 """Continuous bedside-vitals simulator (pipeline step 3: simulate).
 
-Loads scrubbed patients from data/clean/ (written by Synthea_Gen/transform.py - no names,
+Loads scrubbed patients from server/data/clean/ (written by server/Synthea_Gen/transform.py - no names,
 birthdates or addresses), admits each one (an in-progress inpatient Encounter + a bed Location,
 whose bed number is a display label only), then produces a live vitals stream.
 
@@ -38,12 +38,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.append(str(REPO_ROOT))  # for pylib/, shared with Synthea_Gen/
+SERVER_DIR = Path(__file__).resolve().parent.parent  # server/
+REPO_ROOT = SERVER_DIR.parent
+if str(SERVER_DIR) not in sys.path:
+    sys.path.append(str(SERVER_DIR))  # for server/pylib/, shared with server/Synthea_Gen/
 from pylib.loinc import VITAL_LOINC  # noqa: E402
 
-DEFAULT_CLEAN_DIR = REPO_ROOT / "data" / "clean"
+DEFAULT_CLEAN_DIR = SERVER_DIR / "data" / "clean"
 
 # Continuous vitals. Readings also carry `onOxygen` (bool) and `consciousness` (ACVPU letter).
 VITAL_SIGNS = ("heartRateBpm", "systolicMmHg", "diastolicMmHg", "spo2Percent", "temperatureC", "respiratoryRate")
@@ -63,7 +64,7 @@ Reading = Dict[str, object]
 
 
 # ------------------------------------------------------------------------------------------------
-# Patients (scrubbed, from data/clean/)
+# Patients (scrubbed, from server/data/clean/)
 # ------------------------------------------------------------------------------------------------
 
 @dataclass
@@ -143,11 +144,11 @@ def _plain_name(display: str) -> str:
 
 
 def load_clean_patients(clean_dir: Path | str = DEFAULT_CLEAN_DIR) -> List[SimPatient]:
-    """Load scrubbed patients written by Synthea_Gen/transform.py, sorted by id (stable order)."""
+    """Load scrubbed patients written by server/Synthea_Gen/transform.py, sorted by id (stable order)."""
     files = sorted(Path(clean_dir).glob("*.json"))
     if not files:
         raise FileNotFoundError(
-            f"no clean patients in {clean_dir} - run Synthea_Gen/synthea.py then Synthea_Gen/transform.py"
+            f"no clean patients in {clean_dir} - run server/Synthea_Gen/synthea.py then server/Synthea_Gen/transform.py"
         )
     patients = []
     for path in files:

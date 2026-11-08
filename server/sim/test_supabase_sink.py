@@ -1,4 +1,4 @@
-"""Run: python3 -m unittest discover sim -v
+"""Run: python3 -m unittest discover server/sim -v
 
 The real-client test needs the venv (pip install -r requirements.txt); it points the actual
 supabase-py client at a local fake PostgREST server, so it never touches a real project.

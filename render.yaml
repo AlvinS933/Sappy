@@ -2,7 +2,7 @@
 # Deploy: Render dashboard -> New -> Blueprint -> pick this repo. Secrets marked `sync: false`
 # are asked for once in the dashboard; they're never stored in this file.
 #
-# The simulator reads data/clean/ from the repo, so data/clean/ must be committed.
+# The simulator reads server/data/clean/ from the repo, so server/data/clean/ must be committed.
 # Free web services sleep after inactivity, which stops the tick loop - use a paid instance
 # (plan: starter) for anything you demo.
 
@@ -14,7 +14,7 @@ services:
     buildCommand: pip install -r requirements.txt
     # --demo: 1 tick every 2 s = 15 hospital minutes, scripted sepsis + false alarm.
     # Add --reset to clear Supabase vitals/alerts on every start (including restarts/deploys).
-    startCommand: python sim/cli.py serve --demo --host 0.0.0.0 --port $PORT
+    startCommand: python server/sim/cli.py serve --demo --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION

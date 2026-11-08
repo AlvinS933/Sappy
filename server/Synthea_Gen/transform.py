@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Pipeline step 2 (transform): raw Synthea FHIR bundles -> one small, scrubbed JSON per patient.
 
-    python3 Synthea_Gen/transform.py [--raw data/raw/fhir] [--out data/clean]
+    python3 server/Synthea_Gen/transform.py [--raw server/data/raw/fhir] [--out server/data/clean]
 
-Reads   data/raw/fhir/*.json   (gitignored; contains names, addresses, SSNs, ...)
-Writes  data/clean/<patient-id>.json   (committed; safe to share)
+Reads   server/data/raw/fhir/*.json   (gitignored; contains names, addresses, SSNs, ...)
+Writes  server/data/clean/<patient-id>.json   (committed; safe to share)
 
 Privacy rules (see CLAUDE.md):
   - Output never contains names, addresses, telecom, identifiers (MRN/SSN/...), exact birthDate,
@@ -41,9 +41,10 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_RAW = ROOT / "data" / "raw" / "fhir"
-DEFAULT_OUT = ROOT / "data" / "clean"
+SERVER_DIR = Path(__file__).resolve().parent.parent  # server/
+REPO_ROOT = SERVER_DIR.parent
+DEFAULT_RAW = SERVER_DIR / "data" / "raw" / "fhir"
+DEFAULT_OUT = SERVER_DIR / "data" / "clean"
 
 KEEP_OBSERVATION_CATEGORIES = {"vital-signs", "laboratory"}
 _NON_CLINICAL_TAG = re.compile(r"\((finding|situation|person)\)\s*$")
@@ -233,7 +234,7 @@ def run(raw_dir: Path, out_dir: Path, today: Optional[date] = None) -> List[dict
     today = today or date.today()
     files = bundle_files(raw_dir)
     if not files:
-        raise FileNotFoundError(f"no FHIR bundles in {raw_dir} - run Synthea_Gen/synthea.py first")
+        raise FileNotFoundError(f"no FHIR bundles in {raw_dir} - run server/Synthea_Gen/synthea.py first")
 
     cleaned = []
     for path in files:
@@ -253,7 +254,7 @@ def run(raw_dir: Path, out_dir: Path, today: Optional[date] = None) -> List[dict
 
 
 def main(argv=None) -> None:
-    parser = argparse.ArgumentParser(description="Scrub raw Synthea FHIR bundles into data/clean/")
+    parser = argparse.ArgumentParser(description="Scrub raw Synthea FHIR bundles into server/data/clean/")
     parser.add_argument("--raw", type=Path, default=DEFAULT_RAW)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args(argv)
@@ -262,7 +263,7 @@ def main(argv=None) -> None:
     except (FileNotFoundError, ValueError) as e:
         sys.exit(f"error: {e}")
     sizes = [len(json.dumps(c)) for c in cleaned]
-    print(f"==> Wrote {len(cleaned)} clean patients to {args.out.relative_to(ROOT) if args.out.is_relative_to(ROOT) else args.out}/"
+    print(f"==> Wrote {len(cleaned)} clean patients to {args.out.relative_to(REPO_ROOT) if args.out.is_relative_to(REPO_ROOT) else args.out}/"
           f"  (avg {sum(sizes) // max(1, len(sizes)) / 1000:.1f} KB each)")
 
 

@@ -1,12 +1,12 @@
 """Command-line entry point for the vitals simulator.
 
-    python3 sim/cli.py demo                      # scripted demo, fast-forwarded, printed every 15 sim-min
-    python3 sim/cli.py serve --demo              # scripted demo live: 1 tick / 2 s = 15 hospital min
-    python3 sim/cli.py serve --demo --reset      # ...and clear Supabase vitals/alerts first
-    python3 sim/cli.py serve --speed 30          # free-running (random events) on http://127.0.0.1:8765
-    python3 sim/cli.py stream --speed 30         # JSON lines on stdout (one batch per line)
+    python3 server/sim/cli.py demo                      # scripted demo, fast-forwarded, printed every 15 sim-min
+    python3 server/sim/cli.py serve --demo              # scripted demo live: 1 tick / 2 s = 15 hospital min
+    python3 server/sim/cli.py serve --demo --reset      # ...and clear Supabase vitals/alerts first
+    python3 server/sim/cli.py serve --speed 30          # free-running (random events) on http://127.0.0.1:8765
+    python3 server/sim/cli.py stream --speed 30         # JSON lines on stdout (one batch per line)
 
-Patients come from data/clean/ (scrubbed by Synthea_Gen/transform.py). Only the 5-patient ward
+Patients come from server/data/clean/ (scrubbed by server/Synthea_Gen/transform.py). Only the 5-patient ward
 (DEMO_WARD in vitals_sim.py, or --patient-ids / SIM_PATIENT_IDS=id1,id2,...) is simulated. Each is
 admitted to a bed; the bed label is display-only - key everything on patientId / encounterId.
 
@@ -333,7 +333,7 @@ def cmd_serve(args: argparse.Namespace) -> None:
             sink.admit(sim)
         except Exception as e:
             sys.exit(f"Supabase: setup failed: {getattr(e, 'message', None) or e}\n"
-                     "Have the tables been created? Apply supabase/migrations/ (see CLAUDE.md -> Deployment), "
+                     "Have the tables been created? Apply server/supabase/migrations/ (see CLAUDE.md -> Deployment), "
                      "or run with --no-supabase.")
         print(f"Supabase: admitted {len(sim.patients)} patients, writing vitals every tick", flush=True)
     else:
@@ -368,7 +368,7 @@ def main(argv=None) -> None:
     load_dotenv(REPO_ROOT / ".env")
     env = os.environ.get
     parser = argparse.ArgumentParser(description="Synthea-based bedside vitals simulator")
-    parser.add_argument("--clean-dir", default=str(DEFAULT_CLEAN_DIR), help="scrubbed patients (Synthea_Gen/transform.py)")
+    parser.add_argument("--clean-dir", default=str(DEFAULT_CLEAN_DIR), help="scrubbed patients (server/Synthea_Gen/transform.py)")
     parser.add_argument("--seed", type=int, default=int(env("SIM_SEED", 1984)))
     parser.add_argument("--patient-ids", default=env("SIM_PATIENT_IDS", ""),
                         help="comma-separated ward patient ids, in bed order (default: DEMO_WARD)")

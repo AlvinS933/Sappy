@@ -1,6 +1,6 @@
 """Data shape + loader + simulator function tests.
 
-Run: python3 -m unittest discover sim -v   (or: pnpm test:sim)
+Run: python3 -m unittest discover server/sim -v   (or: pnpm test:sim)
 
 Sections:
   1. ReadingShapeTests   - each reading has the fields/types NEWS2 scoring will consume
@@ -200,7 +200,7 @@ class ConsciousnessDerivationTests(unittest.TestCase):
 # ------------------------------------------------------------------------------------------------
 
 def clean_patient(pid: str, **overrides) -> dict:
-    """A patient file as written by Synthea_Gen/transform.py."""
+    """A patient file as written by server/Synthea_Gen/transform.py."""
     d = {"id": pid, "ageBand": "60-69", "gender": "female", "conditions": [], "medications": [], "observations": []}
     d.update(overrides)
     return d

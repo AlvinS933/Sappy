@@ -1,4 +1,4 @@
-"""Run: python3 -m unittest discover sim -v"""
+"""Run: python3 -m unittest discover server/sim -v"""
 
 from __future__ import annotations
 
@@ -209,7 +209,7 @@ class WardTests(unittest.TestCase):
 class RealWardTests(unittest.TestCase):
     def test_demo_ward_exists_in_clean_data(self):
         chosen, found = select_ward(load_clean_patients())
-        self.assertTrue(found, "DEMO_WARD ids missing from data/clean - regenerated with another seed?")
+        self.assertTrue(found, "DEMO_WARD ids missing from server/data/clean - regenerated with another seed?")
         self.assertEqual(len(chosen), 5)
 
 
@@ -234,7 +234,7 @@ class DemoScriptTests(unittest.TestCase):
             self.assertTrue(all(r["spo2Percent"] >= 93 and r["consciousness"] == "A" for r in by_patient[pid]))
 
 
-@unittest.skipUnless(HAS_CLEAN_DATA, "no clean data - run Synthea_Gen/synthea.py and Synthea_Gen/transform.py")
+@unittest.skipUnless(HAS_CLEAN_DATA, "no clean data - run server/Synthea_Gen/synthea.py and server/Synthea_Gen/transform.py")
 class CleanLoaderTests(unittest.TestCase):
     def test_loads_scrubbed_patients(self):
         patients = load_clean_patients()
