@@ -15,6 +15,7 @@
   "dependencies": {
     "@huggingface/transformers": "3.8.1",
     "@repo/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.119.0",
     "kokoro-js": "^1.2.1",
     "onnxruntime-node": "1.21.0",
     "react": "^19.3.1",

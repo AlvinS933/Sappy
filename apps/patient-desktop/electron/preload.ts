@@ -13,7 +13,7 @@ contextBridge.exposeInMainWorld('companion', {
 contextBridge.exposeInMainWorld('patient', {
   assignment: () =>
     ipcRenderer.invoke('patient:assignment') as Promise<
-      { patientId: string; warning?: string } | { patientId: null; error: string }
+      { patientId: string; encounterId: string; bedLabel: string } | { patientId: null; error: string }
     >,
 })
 
@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('ai', {
   chat: (messages: { role: string; content: string }[]) =>
     ipcRenderer.invoke('ai:chat', messages) as Promise<{
       reply: string
-      actions: { id: string; type: string; priority: string; summary: string }[]
+      actions: { id: string; type: string; priority: string; summary: string; delivered: boolean }[]
     }>,
 })
 

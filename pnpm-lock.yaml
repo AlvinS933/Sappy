@@ -236,6 +236,9 @@ importers:
       '@repo/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@supabase/supabase-js':
+        specifier: ^2.119.0
+        version: 2.119.0
       kokoro-js:
         specifier: ^1.2.1
         version: 1.2.1

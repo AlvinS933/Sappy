@@ -21,12 +21,12 @@ export type AgentOptions = {
   model: string
   /** Pseudonymous Patient.id this device is assigned to (null if not configured). */
   patientId: string | null
-  /** Called for every action as soon as it's decided (log it, send it to staff, …). */
-  onAction: (action: PatientAction) => void
+  /** Called for every action as soon as it's decided: send it to staff. Resolves true if delivered. */
+  onAction: (action: PatientAction) => Promise<boolean>
   timeoutMs?: number
 }
 
-export type AgentResult = { reply: string; actions: PatientAction[] }
+export type AgentResult = { reply: string; actions: (PatientAction & { delivered: boolean })[] }
 
 export const SYSTEM_PROMPT = `You are a friendly bedside assistant for a patient in a hospital room. The patient talks to you by voice or text, and your replies are read aloud.
 
@@ -171,13 +171,15 @@ const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T)
 
 export async function runAgent(history: ChatMessage[], opts: AgentOptions): Promise<AgentResult> {
   const patientMessage = [...history].reverse().find((m) => m.role === 'user')?.content ?? ''
-  const actions: PatientAction[] = []
-  const record = (spec: Parameters<typeof createAction>[0], source: PatientAction['source'], detail?: string) => {
+  const actions: (PatientAction & { delivered: boolean })[] = []
+  const record = async (spec: Parameters<typeof createAction>[0], source: PatientAction['source'], detail?: string) => {
     const action = createAction(spec, { patientId: opts.patientId, source, patientMessage, detail })
-    actions.push(action)
-    opts.onAction(action)
-    return action
+    const delivered = await opts.onAction(action)
+    actions.push({ ...action, delivered })
+    return { action, delivered }
   }
+  // Told to the model when an alert couldn't be saved, so it never claims staff were notified.
+  const NOT_DELIVERED = 'FAILED: the request could not be sent to staff. Tell the patient you could not reach the nurses and ask them to press their call button.'
 
   const messages: OllamaMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }, ...history]
 
@@ -185,36 +187,38 @@ export async function runAgent(history: ChatMessage[], opts: AgentOptions): Prom
   let emergencySent = false
   const detected = detectEmergency(patientMessage)
   if (detected) {
-    record({ type: 'emergency', category: detected }, 'safety_check')
+    const { delivered } = await record({ type: 'emergency', category: detected }, 'safety_check')
     emergencySent = true
     messages.push({
       role: 'system',
-      content: 'An emergency alert for this message has ALREADY been sent to the nursing staff. Do not call emergency_alert again. Tell the patient help is on the way and to press their call button now if they can.',
+      content: delivered
+        ? 'An emergency alert for this message has ALREADY been sent to the nursing staff. Do not call emergency_alert again. Tell the patient help is on the way and to press their call button now if they can.'
+        : 'An emergency alert for this message COULD NOT be sent to staff. Do not call emergency_alert. Tell the patient to press their call button right now, and to call out for help if they can.',
     })
   }
 
   // 2. Let the model reply, running any tools it asks for.
-  const runTool = (name: string, args: Record<string, unknown>): string => {
+  const runTool = async (name: string, args: Record<string, unknown>): Promise<string> => {
     switch (name) {
       case 'request_item': {
         const category = oneOf<ItemCategory>(args.category, ITEM_CATEGORIES, 'other')
-        const action = record({ type: 'item_request', category, item: str(args.item) }, 'assistant', str(args.details) || str(args.item))
-        return `Request sent to staff: ${action.label}. Staff will bring it if it's okay for this patient.`
+        const { action, delivered } = await record({ type: 'item_request', category, item: str(args.item) }, 'assistant', str(args.details) || str(args.item))
+        return delivered ? `Request sent to staff: ${action.label}. Staff will bring it if it's okay for this patient.` : NOT_DELIVERED
       }
       case 'call_nurse': {
         let category = oneOf<NurseReason>(args.reason, NURSE_REASONS, 'other')
         // The small model sometimes files bathroom help under "mobility"; staff need to know it's the bathroom.
         if (BATHROOM.test(patientMessage)) category = 'bathroom'
         const priority = oneOf(args.priority, ['routine', 'soon', 'urgent'] as const, 'soon')
-        const action = record({ type: 'nurse_call', category, priority }, 'assistant', str(args.details))
-        return `The nurse has been notified (${priority}): ${action.label}.`
+        const { action, delivered } = await record({ type: 'nurse_call', category, priority }, 'assistant', str(args.details))
+        return delivered ? `The nurse has been notified (${priority}): ${action.label}.` : NOT_DELIVERED
       }
       case 'emergency_alert': {
         if (emergencySent) return 'An emergency alert was already sent for this. Staff are on the way.'
         const category = oneOf<EmergencyKind>(args.kind, EMERGENCY_KINDS, 'other')
-        record({ type: 'emergency', category }, 'assistant', str(args.details))
+        const { delivered } = await record({ type: 'emergency', category }, 'assistant', str(args.details))
         emergencySent = true
-        return 'Emergency alert sent. Staff are on the way.'
+        return delivered ? 'Emergency alert sent. Staff are on the way.' : NOT_DELIVERED
       }
       default:
         return `Unknown tool "${name}". Nothing was sent.`
@@ -247,7 +251,7 @@ export async function runAgent(history: ChatMessage[], opts: AgentOptions): Prom
       }
       messages.push({ role: 'assistant', content: message.content ?? '', tool_calls: message.tool_calls })
       for (const call of message.tool_calls) {
-        const result = runTool(call.function.name, call.function.arguments ?? {})
+        const result = await runTool(call.function.name, call.function.arguments ?? {})
         messages.push({ role: 'tool', tool_name: call.function.name, content: result })
       }
     }
@@ -261,7 +265,10 @@ export async function runAgent(history: ChatMessage[], opts: AgentOptions): Prom
 }
 
 /** Used if the model gives no usable reply, so the patient always hears something accurate. */
-function fallbackReply(actions: PatientAction[]): string {
+function fallbackReply(actions: (PatientAction & { delivered: boolean })[]): string {
+  if (actions.some((a) => !a.delivered)) {
+    return "I couldn't reach the nursing staff. Please press your call button now."
+  }
   if (actions.some((a) => a.type === 'emergency')) {
     return "I've alerted the nursing staff and help is on the way. Please press your call button now if you can."
   }

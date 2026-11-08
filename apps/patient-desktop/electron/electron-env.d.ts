@@ -36,8 +36,8 @@ interface Window {
     onCaption(cb: (text: string | null) => void): () => void
   }
   patient: {
-    /** Which patient this device is assigned to (PATIENT_ID), or why it isn't. */
-    assignment(): Promise<{ patientId: string; warning?: string } | { patientId: null; error: string }>
+    /** Which patient this device plays (fetched from the database at startup), or why there's none. */
+    assignment(): Promise<{ patientId: string; encounterId: string; bedLabel: string } | { patientId: null; error: string }>
   }
   ai: {
     /** Send the conversation; returns the assistant's reply and any actions it took (item requests, nurse calls, emergencies). */
@@ -81,6 +81,8 @@ type AiAction = {
   type: 'item_request' | 'nurse_call' | 'emergency'
   priority: 'routine' | 'soon' | 'urgent' | 'emergency'
   summary: string
+  /** False if the alert couldn't be saved to the database (staff were NOT notified). */
+  delivered: boolean
 }
 
 type VoiceEvent =

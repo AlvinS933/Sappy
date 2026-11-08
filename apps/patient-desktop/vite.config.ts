@@ -16,7 +16,7 @@ export default defineConfig({
           build: {
             // Load these from node_modules at runtime instead of bundling them
             // (they include a native ONNX runtime and large data files).
-            rolldownOptions: { external: ['kokoro-js', '@huggingface/transformers', 'onnxruntime-node'] },
+            rolldownOptions: { external: ['kokoro-js', '@huggingface/transformers', 'onnxruntime-node', '@supabase/supabase-js'] },
           },
         },
       },

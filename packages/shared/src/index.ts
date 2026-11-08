@@ -58,6 +58,9 @@ export interface VitalsRow {
 
 export type AlertTier = 'watch' | 'check soon' | 'go now'
 
+/** Every alert starts 'incomplete'; staff mark it 'completed'. */
+export type AlertStatus = 'incomplete' | 'completed'
+
 export interface AlertRow {
   id: number
   patient_id: string
@@ -66,16 +69,36 @@ export interface AlertRow {
   tier: AlertTier
   news2_score: number | null
   reason: string
-  acknowledged_at: string | null
+  status: AlertStatus
+  completed_at: string | null // set by the database when status becomes 'completed'
 }
 
 /**
- * Columns a writer supplies when inserting an alert (`id`, `created_at` and `acknowledged_at`
- * are filled by the database / the nurse). Used by the NEWS2 worker's alerts and by the patient
- * app's assistant (item requests, nurse calls, emergencies; `news2_score` is null for those).
- * `reason` must never contain patient free text.
+ * Columns a writer supplies when inserting a NEWS2 alert (`id`, `created_at`, `status` and
+ * `completed_at` are filled by the database). `reason` must never contain patient free text.
  */
 export type NewAlertRow = Pick<AlertRow, 'patient_id' | 'encounter_id' | 'tier' | 'news2_score' | 'reason'>
+
+/**
+ * A request the patient made through the bedside app (apps/patient-desktop). Kept in its own
+ * table, `patient_requests`, so the NEWS2 worker (which owns `alerts`) never touches it.
+ * Every field comes from fixed lists: no patient free text.
+ */
+export type PatientRequestKind = 'item_request' | 'nurse_call' | 'emergency'
+
+export interface PatientRequestRow {
+  id: number
+  patient_id: string
+  encounter_id: string
+  created_at: string
+  kind: PatientRequestKind
+  category: string // e.g. "bathroom", "chest_pain", "drink"
+  label: string // short fixed label, e.g. "help to the bathroom"
+  tier: AlertTier // same scale as NEWS2 alerts
+  source: 'assistant' | 'safety_check' // AI decision, or the keyword safety check
+  status: AlertStatus
+  completed_at: string | null
+}
 
 export interface EncounterRow {
   id: string
