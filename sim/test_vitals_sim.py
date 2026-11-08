@@ -15,11 +15,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from vitals_sim import (  # noqa: E402
     DEFAULT_CLEAN_DIR,
     DEMO_TICK_MIN,
+    DEMO_WARD,
     VITAL_SIGNS,
     SimPatient,
     VitalsSimulator,
     load_clean_patients,
     schedule_demo,
+    select_ward,
 )
 
 START = 1767254400.0  # 2026-01-01T08:00:00Z
@@ -199,6 +201,34 @@ class AdmissionTests(unittest.TestCase):
         a = VitalsSimulator(ward(2), seed=5, start_time=START).admission("p1")
         b = VitalsSimulator(ward(2), seed=5, start_time=START).admission("p1")
         self.assertEqual(a, b)
+
+
+class WardTests(unittest.TestCase):
+    def test_ward_is_five_patients_in_bed_order(self):
+        patients = [SimPatient(**{**HEALTHY.__dict__, "id": i}) for i in reversed(DEMO_WARD)] + ward(3)
+        chosen, found = select_ward(patients)
+        self.assertTrue(found)
+        self.assertEqual([p.id for p in chosen], list(DEMO_WARD))
+        sim = VitalsSimulator(chosen, start_time=START)
+        self.assertEqual(len(sim.step(5)), 5)
+        self.assertEqual(schedule_demo(sim), {"sepsis": DEMO_WARD[1], "falseAlarm": DEMO_WARD[3]})
+
+    def test_falls_back_to_first_five_by_id_when_ids_missing(self):
+        chosen, found = select_ward(ward(7))
+        self.assertFalse(found)
+        self.assertEqual([p.id for p in chosen], ["p0", "p1", "p2", "p3", "p4"])
+
+    def test_custom_ids(self):
+        chosen, found = select_ward(ward(4), ("p3", "p1"))
+        self.assertEqual(([p.id for p in chosen], found), (["p3", "p1"], True))
+
+
+@unittest.skipUnless(HAS_CLEAN_DATA, "no clean data")
+class RealWardTests(unittest.TestCase):
+    def test_demo_ward_exists_in_clean_data(self):
+        chosen, found = select_ward(load_clean_patients())
+        self.assertTrue(found, "DEMO_WARD ids missing from data/clean - regenerated with another seed?")
+        self.assertEqual(len(chosen), 5)
 
 
 class DemoScriptTests(unittest.TestCase):

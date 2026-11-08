@@ -2,8 +2,10 @@
 
 Used by `python3 sim/cli.py serve` when SUPABASE_URL and SUPABASE_SECRET_KEY are set
 (SUPABASE_SERVICE_ROLE_KEY, the legacy name, also works):
-  - on start: upsert patients + their in-progress encounters, finish encounters from older runs
-  - every tick: insert one `vitals` row per patient
+  - on start: remove patients that aren't on this run's ward (so the tables hold exactly the ward),
+    upsert the ward's patients + in-progress encounters, finish encounters from older runs
+  - every tick: upsert one `vitals` row per patient, keyed on patient_id - the patient's existing
+    row is updated in place, or created if it doesn't exist yet. No history accumulates.
 
 Uses the secret key (sb_secret_..., bypasses Row Level Security), so it must only run server-side
 (Render or a laptop) - never in a browser. Ground truth (which scenario is running) is NOT written:
@@ -93,11 +95,14 @@ class SupabaseSink:
     def reset(self) -> None:
         """Delete all vitals and alerts (a fresh demo run). Patients/encounters are upserted anyway."""
         self.client.table("alerts").delete().not_.is_("id", "null").execute()
-        self.client.table("vitals").delete().not_.is_("id", "null").execute()
+        self.client.table("vitals").delete().not_.is_("patient_id", "null").execute()
 
     def admit(self, sim: VitalsSimulator) -> None:
-        """Upsert this run's patients + encounters; mark any other in-progress encounter finished."""
-        self.client.table("patients").upsert(patient_rows(sim), on_conflict="id").execute()
+        """Make the tables match this run's ward: delete other patients (cascades to their encounters,
+        vitals and alerts), upsert the ward's patients + encounters, finish their older encounters."""
+        patients = patient_rows(sim)
+        self.client.table("patients").delete().not_.in_("id", [p["id"] for p in patients]).execute()
+        self.client.table("patients").upsert(patients, on_conflict="id").execute()
         encounters = encounter_rows(sim)
         self.client.table("encounters").upsert(encounters, on_conflict="id").execute()
         (
@@ -109,5 +114,6 @@ class SupabaseSink:
         )
 
     def write(self, readings: List[Dict[str, Any]]) -> None:
+        """Upsert each patient's latest reading: update their row, or insert it if it doesn't exist."""
         if readings:
-            self.client.table("vitals").insert([vitals_row(r) for r in readings]).execute()
+            self.client.table("vitals").upsert([vitals_row(r) for r in readings], on_conflict="patient_id").execute()

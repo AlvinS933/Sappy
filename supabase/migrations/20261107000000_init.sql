@@ -28,10 +28,11 @@ create table public.encounters (
 );
 create index encounters_patient on public.encounters (patient_id);
 
--- Vitals: one row per patient per simulator tick (same fields as VitalsReading in packages/shared).
+-- Vitals: the LATEST reading per patient (same fields as VitalsReading in packages/shared).
+-- The simulator upserts on patient_id every tick: it updates the patient's row, or inserts it on
+-- the first tick. There is no history here - subscribe to Realtime UPDATEs to follow changes.
 create table public.vitals (
-  id               bigint generated always as identity primary key,
-  patient_id       text not null references public.patients (id) on delete cascade,
+  patient_id       text primary key references public.patients (id) on delete cascade,
   encounter_id     uuid not null references public.encounters (id) on delete cascade,
   recorded_at      timestamptz not null,       -- simulated hospital time
   heart_rate_bpm   smallint,
@@ -43,7 +44,7 @@ create table public.vitals (
   on_oxygen        boolean,
   consciousness    text check (consciousness in ('A', 'C', 'V', 'P', 'U'))  -- ACVPU
 );
-create index vitals_encounter_time on public.vitals (encounter_id, recorded_at desc);
+create index vitals_encounter on public.vitals (encounter_id);
 
 -- Alerts: written by the NEWS2 + ML agent. Tiers follow the NEWS2 clinical response bands.
 create table public.alerts (

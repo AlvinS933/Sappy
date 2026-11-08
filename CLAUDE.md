@@ -183,9 +183,19 @@ runs are reproducible.
 - **early sepsis**: HR, RR and temp rise; SpO2 drifts down; SBP falls late; possibly new confusion
 - **false alarm**: one implausible SpO2 reading, immediately back to normal
 
+The ward is **5 patients** (`DEMO_WARD` in `sim/vitals_sim.py`, beds 4W-01..05; override with
+`SIM_PATIENT_IDS`). Bed 4W-02 gets sepsis and 4W-04 the loose probe. Only these 5 are simulated and
+written to Supabase; on start the simulator removes any other patients from the tables.
+
+`vitals` in Supabase holds **one row per patient** with their latest reading: every tick the
+simulator upserts on `patient_id` (update the row, or insert it the first time). There's no history
+in the table, so the NEWS2 agent and the UI must keep their own history from Realtime UPDATE events
+for trend detection and charts.
+
 ## Open decisions (ask before building)
 
 - How the NEWS2 agent consumes vitals: Supabase Realtime subscription vs. polling `vitals`.
-- Whether to also store vitals as FHIR `Observation` JSON (today: one wide `vitals` row per tick).
+- Whether to also keep vitals history in Supabase (today `vitals` holds only the latest reading per
+  patient, updated in place), and/or store vitals as FHIR `Observation` JSON.
 - Exactly what the scikit-learn model does (artifact detection, trend, or both).
 - Stretch: replay one patient from the MIMIC-IV demo on FHIR (PhysioNet) as a "real data" showcase.

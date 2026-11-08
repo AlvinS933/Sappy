@@ -6,7 +6,8 @@
     python3 sim/cli.py serve --speed 30          # free-running (random events) on http://127.0.0.1:8765
     python3 sim/cli.py stream --speed 30         # JSON lines on stdout (one batch per line)
 
-Patients come from data/clean/ (scrubbed by Synthea_Gen/transform.py). Each is admitted to a bed;
+Patients come from data/clean/ (scrubbed by Synthea_Gen/transform.py). Only the 5-patient ward
+(DEMO_WARD in vitals_sim.py, or SIM_PATIENT_IDS=id1,id2,...) is simulated. Each is admitted to a bed;
 the bed label is display-only - key everything on patientId / encounterId.
 
 `serve` also writes every tick to Supabase (sim/supabase_sink.py) when SUPABASE_URL and
@@ -53,6 +54,7 @@ from vitals_sim import (  # noqa: E402
     VitalsSimulator,
     load_clean_patients,
     schedule_demo,
+    select_ward,
 )
 from supabase_sink import SupabaseSink  # noqa: E402
 
@@ -61,8 +63,18 @@ from supabase_sink import SupabaseSink  # noqa: E402
 # demo / stream
 # ------------------------------------------------------------------------------------------------
 
+def load_ward(args: argparse.Namespace) -> list:
+    """The patients to simulate: DEMO_WARD (5 patients), or SIM_PATIENT_IDS=id1,id2,... if set."""
+    custom = [i.strip() for i in os.environ.get("SIM_PATIENT_IDS", "").split(",") if i.strip()]
+    ward, found = select_ward(load_clean_patients(args.clean_dir), *([tuple(custom)] if custom else []))
+    if not found:
+        print(f"warning: ward patient ids not in {args.clean_dir}; using the first {len(ward)} by id instead",
+              file=sys.stderr, flush=True)
+    return ward
+
+
 def cmd_demo(args: argparse.Namespace) -> None:
-    patients = load_clean_patients(args.clean_dir)[: args.patients]
+    patients = load_ward(args)
     start = datetime(2026, 1, 1, 8, tzinfo=timezone.utc).timestamp()
     sim = VitalsSimulator(patients, seed=args.seed, start_time=start, event_rate_per_hour=0)
     truth = schedule_demo(sim)
@@ -88,7 +100,7 @@ def cmd_demo(args: argparse.Namespace) -> None:
 
 
 def cmd_stream(args: argparse.Namespace) -> None:
-    sim = VitalsSimulator(load_clean_patients(args.clean_dir), seed=args.seed, event_rate_per_hour=args.event_rate)
+    sim = VitalsSimulator(load_ward(args), seed=args.seed, event_rate_per_hour=args.event_rate)
     try:
         for readings in sim.stream(interval_sec=args.interval, speed=args.speed):
             print(json.dumps(readings), flush=True)
@@ -285,7 +297,7 @@ class Handler(BaseHTTPRequestHandler):
 def cmd_serve(args: argparse.Namespace) -> None:
     if args.demo:  # CLAUDE.md: 1 tick every 2 s real time = 15 min hospital time, no random events
         args.interval, args.speed, args.event_rate = 2.0, DEMO_TICK_MIN * 60 / 2.0, 0.0
-    sim = VitalsSimulator(load_clean_patients(args.clean_dir), seed=args.seed, event_rate_per_hour=args.event_rate)
+    sim = VitalsSimulator(load_ward(args), seed=args.seed, event_rate_per_hour=args.event_rate)
     truth = schedule_demo(sim) if args.demo else None
 
     sink = None if args.no_supabase else SupabaseSink.from_env()
@@ -351,7 +363,6 @@ def main(argv=None) -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     demo = sub.add_parser("demo", help="fast-forward the scripted demo and print a ward table")
-    demo.add_argument("--patients", type=int, default=5)
     demo.add_argument("--hours", type=int, default=8)
     demo.set_defaults(func=cmd_demo)
 

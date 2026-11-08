@@ -488,6 +488,29 @@ class VitalsSimulator:
 
 DEMO_TICK_MIN = 15  # one tick = 15 hospital minutes (every 2 s real time when served)
 
+# The ward: 5 patients in bed order (4W-01 .. 4W-05). schedule_demo() gives bed 4W-02 sepsis and
+# 4W-04 the loose-probe false alarm. Picked from the seed-1984 Synthea run for a realistic inpatient
+# mix: mostly older, both genders, cardiac / renal / diabetic history.
+DEMO_WARD = (
+    "8398b128-7c86-69f2-456a-a0afb52067c1",  # 80-89 M  hypertension, ischemic heart disease
+    "5a4445ed-e27a-6c4c-96bd-307b7bbee226",  # 80-89 F  type 2 diabetes, CKD          -> sepsis
+    "9020f065-b607-4ea6-719f-2ea65bb06c8b",  # 70-79 M  recent NSTEMI, 16 medications
+    "1ebf325c-5fd9-9259-79cf-44f209b97ee8",  # 60-69 F  hypertension                  -> loose SpO2 probe
+    "94011f7c-9aaa-e26e-a4e8-fe735f840734",  # 60-69 M  alcoholism, CKD, anemia
+)
+
+
+def select_ward(patients: List[SimPatient], ids: Tuple[str, ...] = DEMO_WARD) -> Tuple[List[SimPatient], bool]:
+    """Return (the ward's patients in bed order, whether the requested ids were all found).
+
+    If any id is missing (e.g. data regenerated with another seed), falls back to the first
+    len(ids) patients by id so the ward size stays the same.
+    """
+    by_id = {p.id: p for p in patients}
+    if all(i in by_id for i in ids):
+        return [by_id[i] for i in ids], True
+    return sorted(patients, key=lambda p: p.id)[: len(ids)], False
+
 
 def schedule_demo(sim: VitalsSimulator, sepsis_bed: int = 1, false_alarm_bed: int = 3) -> Dict[str, str]:
     """Script the demo: most patients stay stable, one develops early sepsis, one gets a single

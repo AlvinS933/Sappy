@@ -118,20 +118,23 @@ class SinkTests(unittest.TestCase):
         self.sink = SupabaseSink(self.client)
         self.sim = quiet_sim()
 
-    def test_admit_upserts_then_finishes_old_encounters(self):
+    def test_admit_prunes_other_patients_upserts_then_finishes_old_encounters(self):
         self.sink.admit(self.sim)
         ops = [(c["table"], c["op"]) for c in self.client.log]
-        self.assertEqual(ops, [("patients", "upsert"), ("encounters", "upsert"), ("encounters", "update")])
-        self.assertEqual(self.client.log[0]["kwargs"], {"on_conflict": "id"})
-        finish = self.client.log[2]
+        self.assertEqual(ops, [("patients", "delete"), ("patients", "upsert"), ("encounters", "upsert"),
+                               ("encounters", "update")])
+        self.assertEqual(self.client.log[0]["filters"], [("not.in", "id", ["p0", "p1"])])
+        self.assertEqual(self.client.log[1]["kwargs"], {"on_conflict": "id"})
+        finish = self.client.log[3]
         ids = [self.sim.admission(f"p{i}").encounter_id for i in range(2)]
         self.assertEqual(finish["data"], {"status": "finished"})
         self.assertEqual(finish["filters"], [("not.in", "id", ids), ("eq", "status", "in-progress")])
 
-    def test_write_inserts_one_row_per_patient(self):
+    def test_write_upserts_one_row_per_patient_keyed_on_patient(self):
         self.sink.write(self.sim.step(5))
         (call,) = self.client.log
-        self.assertEqual((call["table"], call["op"], len(call["data"])), ("vitals", "insert", 2))
+        self.assertEqual((call["table"], call["op"], len(call["data"])), ("vitals", "upsert", 2))
+        self.assertEqual(call["kwargs"], {"on_conflict": "patient_id"})
         self.sink.write([])
         self.assertEqual(len(self.client.log), 1)  # empty batch: no request
 
@@ -139,7 +142,7 @@ class SinkTests(unittest.TestCase):
         self.sink.reset()
         self.assertEqual([(c["table"], c["op"], c["filters"]) for c in self.client.log], [
             ("alerts", "delete", [("not.is", "id", "null")]),
-            ("vitals", "delete", [("not.is", "id", "null")]),
+            ("vitals", "delete", [("not.is", "patient_id", "null")]),
         ])
 
     def test_from_env_none_when_unconfigured(self):
@@ -188,9 +191,9 @@ class ServerSinkTests(unittest.TestCase):
             def write(self, readings):
                 raise RuntimeError("network down")
 
-        server, base = self.start(sink=Broken())
         import io, time
         with mock.patch("sys.stderr", new=io.StringIO()):
+            server, base = self.start(sink=Broken())
             first = server.seq
             time.sleep(0.3)
         self.assertGreater(server.seq, first + 2)
@@ -220,6 +223,7 @@ class RealClientTests(unittest.TestCase):
 
     def setUp(self):
         requests = self.requests = []
+        tables = self.tables = {}  # table -> {conflict key value: row}
 
         class FakePostgrest(BaseHTTPRequestHandler):
             def log_message(self, *a):
@@ -228,13 +232,24 @@ class RealClientTests(unittest.TestCase):
             def _handle(self):
                 length = int(self.headers.get("Content-Length") or 0)
                 url = urlparse(self.path)
-                requests.append({
+                req = {
                     "method": self.command,
                     "path": url.path,
                     "query": {k: v[0] for k, v in parse_qs(url.query).items()},
                     "body": json.loads(self.rfile.read(length)) if length else None,
                     "auth": self.headers.get("Authorization", ""),
-                })
+                    "prefer": self.headers.get("Prefer", ""),
+                }
+                requests.append(req)
+                # Minimal table semantics for POST: upsert replaces by on_conflict key, insert appends.
+                if self.command == "POST":
+                    table = tables.setdefault(url.path.rsplit("/", 1)[-1], {})
+                    key = req["query"].get("on_conflict")
+                    for row in req["body"]:
+                        if key and "resolution=merge-duplicates" in req["prefer"]:
+                            table[row[key]] = row
+                        else:
+                            table[len(table)] = row
                 payload = b"[]"
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -261,18 +276,31 @@ class RealClientTests(unittest.TestCase):
         got = [(r["method"], r["path"]) for r in self.requests]
         self.assertEqual(got, [
             ("DELETE", "/rest/v1/alerts"), ("DELETE", "/rest/v1/vitals"),
-            ("POST", "/rest/v1/patients"), ("POST", "/rest/v1/encounters"),
+            ("DELETE", "/rest/v1/patients"), ("POST", "/rest/v1/patients"), ("POST", "/rest/v1/encounters"),
             ("PATCH", "/rest/v1/encounters"), ("POST", "/rest/v1/vitals"),
         ])
-        self.assertEqual(self.requests[0]["query"], {"id": "not.is.null"})
-        self.assertEqual(self.requests[2]["query"]["on_conflict"], "id")
+        self.assertEqual(self.requests[1]["query"], {"patient_id": "not.is.null"})
+        self.assertEqual(self.requests[2]["query"], {"id": "not.in.(p0,p1)"})
+        self.assertEqual(self.requests[3]["query"]["on_conflict"], "id")
         ids = ",".join(sim.admission(f"p{i}").encounter_id for i in range(2))
-        self.assertEqual(self.requests[4]["query"], {"id": f"not.in.({ids})", "status": "eq.in-progress"})
-        self.assertEqual(self.requests[4]["body"], {"status": "finished"})
-        vitals = self.requests[5]["body"]
-        self.assertEqual(len(vitals), 2)
-        self.assertEqual(set(vitals[0]), set(VITALS_COLUMNS.values()))
+        self.assertEqual(self.requests[5]["query"], {"id": f"not.in.({ids})", "status": "eq.in-progress"})
+        self.assertEqual(self.requests[5]["body"], {"status": "finished"})
+        vitals = self.requests[6]
+        self.assertEqual(vitals["query"]["on_conflict"], "patient_id")
+        self.assertIn("resolution=merge-duplicates", vitals["prefer"])  # upsert, not plain insert
+        self.assertEqual(len(vitals["body"]), 2)
+        self.assertEqual(set(vitals["body"][0]), set(VITALS_COLUMNS.values()))
         self.assertTrue(all(r["auth"].startswith("Bearer ") for r in self.requests))
+
+    def test_repeated_ticks_update_one_row_per_patient(self):
+        sim = quiet_sim(2)
+        self.sink.admit(sim)
+        for _ in range(10):
+            last = sim.step(5)
+            self.sink.write(last)
+        vitals = self.tables["vitals"]
+        self.assertEqual(sorted(vitals), ["p0", "p1"])  # still 2 rows after 10 ticks
+        self.assertEqual(vitals["p0"]["recorded_at"], last[0]["recordedAt"])  # holds the latest reading
 
 
 if __name__ == "__main__":

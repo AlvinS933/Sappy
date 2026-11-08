@@ -41,9 +41,9 @@ export type Consciousness = 'A' | 'C' | 'V' | 'P' | 'U'
 // `supabase gen types typescript` output.
 // ---------------------------------------------------------------------------------------------
 
+/** One row per patient holding their LATEST reading (upserted every tick, no history). */
 export interface VitalsRow {
-  id: number
-  patient_id: string
+  patient_id: string // primary key
   encounter_id: string
   recorded_at: string
   heart_rate_bpm: number | null
