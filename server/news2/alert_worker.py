@@ -31,6 +31,9 @@ from scoring import News2Monitor, spo2_scale_for  # noqa: E402
 
 log = logging.getLogger("alert-worker")
 
+# The simulator writes one vitals row per patient every 2 s (one tick); poll at the same rate.
+POLL_SECONDS = 2.0
+
 TIER_RANK = {"none": 0, "watch": 1, "check soon": 2, "go now": 3}
 
 # vitals column -> VitalsReading key (what scoring.py expects)
@@ -170,7 +173,8 @@ def make_client() -> Any:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--interval", type=float, default=1.0, help="seconds between polls (default 1)")
+    ap.add_argument("--interval", type=float, default=POLL_SECONDS,
+                    help=f"seconds between polls (default {POLL_SECONDS:g}, one simulator tick)")
     ap.add_argument("--from-start", action="store_true", help="score existing vitals rows too")
     args = ap.parse_args()
 

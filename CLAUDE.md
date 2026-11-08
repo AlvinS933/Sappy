@@ -26,11 +26,15 @@ alert fatigue, so the aim is fewer, better alerts.
 apps/nurse-web/          Vite + React nurse dashboard (TS)
 apps/patient-desktop/    Electron + React patient app (TS)
 packages/shared/         @repo/shared - TS types shared by both apps (VitalsReading, ...)
-server/                  all backend Python (standard library only, Python 3.9+)
+server/                  all backend Python
+  requirements.txt         pip deps for Render (supabase)
   Synthea_Gen/synthea.py   runs Synthea -> server/data/synthea/{csv,fhir}/ (gitignored)
   sim/                     vitals simulator: loads Synthea CSV, streams readings, HTTP/SSE server
-  news2/scoring.py         NEWS2 scoring + alert persistence rule
+  news2/scoring.py         NEWS2 scoring + alert persistence rule (stdlib only)
+  news2/alert_worker.py    reads `vitals` from Supabase, scores, writes `alerts` (Render worker)
 ```
+
+"Agent" is reserved for the actual AI agents; plain loops like the alert worker are "workers".
 
 ## Stack
 
@@ -38,7 +42,9 @@ server/                  all backend Python (standard library only, Python 3.9+)
 |---|---|
 | Frontends | TypeScript: `apps/nurse-web` (Vite + React), `apps/patient-desktop` (Electron + React) |
 | Shared TS types | `packages/shared` (`@repo/shared`) |
-| Backend | Python, standard library only, in `server/`. FastAPI planned but not set up yet |
+| Backend | Python in `server/`. Sim + scoring are stdlib only; Supabase writers use the `supabase` package |
+| Database | Supabase (Postgres), schema in teammate's `supabase/migrations/`. RLS on every table |
+| Hosting | Backend on Render (paid plan, so the tick loop never sleeps); frontends on Vercel |
 | Severity scoring | NEWS2, a plain local algorithm (no ML model) |
 | Data model | HL7 FHIR R4 concepts and LOINC codes; readings are plain camelCase JSON |
 | Mock patients | Synthea (Java CLI, run once to generate data) |
@@ -51,7 +57,8 @@ go to the apps as JSON unchanged. Keep the two in sync by hand when fields chang
 ## Prerequisites
 
 - Node + pnpm: everyone. pnpm is auto-downloaded via `devEngines`.
-- Python 3.9+: everyone working on the backend. No packages to install.
+- Python 3.9+: everyone working on the backend (Render uses 3.12). Sim + scoring need no packages;
+  the alert worker needs `pip install -r server/requirements.txt`.
 - Java 17+: **only** to regenerate Synthea data. Mac: `brew install openjdk@17`.
 
 ## Commands
@@ -67,12 +74,18 @@ pnpm data:synthea    # generate patients -> server/data/synthea/ (needs Java)
 pnpm sim:demo        # fast-forward 3 h and print a ward table
 pnpm sim:serve       # HTTP + Server-Sent Events on http://127.0.0.1:8765
 pnpm test:sim        # simulator + data shape tests
+pnpm alerts          # alert worker (needs SUPABASE_URL + SUPABASE_SECRET_KEY in env or .env)
+pnpm test:alerts     # alert worker tests (fake Supabase client, no network)
 ```
 
 ## Privacy rules
 
-- Synthea data is synthetic. The simulator currently loads Synthea names and birthdates as-is;
-  the team has accepted that for mock data.
+- Synthea data is synthetic. The local simulator loads Synthea names and birthdates as-is;
+  the team has accepted that for mock data. **Supabase only ever gets pseudonymized data**:
+  patient ID, age band, gender, coded conditions/medications, vitals. No names or birthdates.
+- `SUPABASE_SECRET_KEY` bypasses RLS: server-side only (Render, a laptop's `.env`), never in a
+  frontend or a `VITE_` variable. Browsers use the publishable key and must sign in.
+- `.env` is gitignored; never commit keys.
 - Key everything on patient IDs, never on bed/room number. Room is a display label only.
 - If an external LLM is ever called, it only receives pseudonymized clinical data (no names,
   addresses, phone numbers, identifiers, exact birthdates, or free-text notes).
@@ -84,7 +97,15 @@ pnpm test:sim        # simulator + data shape tests
 2. **simulate**: `server/sim/vitals_sim.py` loads patients from the Synthea **CSV** (active
    conditions, latest vitals), derives a baseline per patient, and emits one reading per patient
    per tick. Scenarios (sepsis, hypoxia, ...) push vitals away from baseline. Deterministic given a seed.
-3. **score**: `server/news2/scoring.py` scores each reading and decides the alert tier.
+3. **store**: the simulator (Render web service) writes one `vitals` row per patient every
+   **2 seconds** (one tick) to Supabase. (Supabase writer is on the `supabase-v1` branch.)
+4. **score**: `server/news2/alert_worker.py` (Render worker) polls `vitals` every 2 s, scores with
+   `scoring.py`'s `News2Monitor`, and inserts an `alerts` row only when a patient's confirmed
+   tier rises above the last tier alerted (holding a tier doesn't repeat it). All tiers,
+   including `watch`, are written; the frontend shows `watch` quietly.
+5. **show**: the nurse app (Vercel) reads Supabase directly with the publishable key after login,
+   gets new `vitals`/`alerts` via Supabase Realtime, and sets `alerts.acknowledged_at`.
+   The apps never call Render for data (only the sim's optional demo controls).
 
 Reading shape (one per patient per tick):
 
@@ -153,8 +174,12 @@ Each patient has a stable baseline plus noise; scenarios have an onset -> hold -
 - **false alarm**: one implausible SpO2 reading, immediately back to normal. **Not in the
   simulator yet**; needed to demo the persistence rule.
 
+## Decided
+
+- Apps get live data from **Supabase Realtime**, not an SSE stream from our server.
+- Server writes to Supabase via the `supabase` package + `SUPABASE_SECRET_KEY` (not raw Postgres).
+- Alerts are written for every tier, including `watch`.
+
 ## Open decisions (ask before building)
 
-- FastAPI backend vs. extending the simulator's built-in HTTP/SSE server.
-- How the apps consume alerts (same SSE stream with scores attached, or a separate endpoint).
 - Stretch: replay one patient from the MIMIC-IV demo on FHIR (PhysioNet) as a "real data" showcase.
