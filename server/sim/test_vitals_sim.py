@@ -1,4 +1,4 @@
-"""Run: python3 -m unittest discover server/sim -v"""
+"""Run: python3 -m unittest discover sim -v"""
 
 from __future__ import annotations
 
@@ -13,19 +13,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from vitals_sim import (  # noqa: E402
-    DEFAULT_CSV_DIR,
+    DEFAULT_CLEAN_DIR,
+    DEMO_TICK_MIN,
     VITAL_SIGNS,
     SimPatient,
     VitalsSimulator,
-    load_synthea_patients,
+    load_clean_patients,
+    schedule_demo,
 )
 
 START = 1767254400.0  # 2026-01-01T08:00:00Z
 
 HEALTHY = SimPatient(
-    id="healthy", first_name="Test", last_name="Healthy", room="1", birth_date="1980-01-01", gender="F",
+    id="healthy", age_band="40-49", gender="female",
     conditions=[], last_vitals={"heartRateBpm": 70, "systolicMmHg": 120, "diastolicMmHg": 78},
 )
+HAS_CLEAN_DATA = any(DEFAULT_CLEAN_DIR.glob("*.json"))
+
+
+def ward(n: int) -> list:
+    return [SimPatient(**{**HEALTHY.__dict__, "id": f"p{i}"}) for i in range(n)]
 
 
 def run(sim: VitalsSimulator, minutes: float) -> list:
@@ -140,24 +147,104 @@ class SimulatorTests(unittest.TestCase):
             sim.trigger("healthy", "zombie")
 
 
-@unittest.skipUnless((DEFAULT_CSV_DIR / "patients.csv").exists(), "no Synthea data - run server/Synthea_Gen/synthea.py")
-class SyntheaLoaderTests(unittest.TestCase):
-    def test_loads_patients(self):
-        patients = load_synthea_patients()
+class SepsisTimingTests(unittest.TestCase):
+    def test_sbp_falls_after_hr_and_temp(self):
+        sim = VitalsSimulator([HEALTHY], start_time=START, event_rate_per_hour=0)
+        base = sim.baseline("healthy")
+        sim.trigger("healthy", "sepsis", onset_min=240, hold_min=math.inf)
+        early = run(sim, 150)[-60:]  # ~60% through onset: HR/temp up, SBP lag (75% of onset) not reached
+        self.assertGreater(mean(early, "heartRateBpm"), base["heartRateBpm"] + 15)
+        self.assertGreater(mean(early, "temperatureC"), base["temperatureC"] + 0.8)
+        self.assertLess(abs(mean(early, "systolicMmHg") - base["systolicMmHg"]), 4)
+        late = run(sim, 300)[-60:]
+        self.assertLess(mean(late, "systolicMmHg"), base["systolicMmHg"] - 20)
+
+
+class ArtifactTests(unittest.TestCase):
+    def test_single_implausible_spo2_reading_then_normal(self):
+        sim = VitalsSimulator([HEALTHY], start_time=START, event_rate_per_hour=0)
+        run(sim, 10)
+        sim.inject_artifact("healthy")
+        hr_before = sim.step(5)  # artifact lands on this reading
+        (r,) = hr_before
+        self.assertTrue(72 <= r["spo2Percent"] <= 80, r)
+        self.assertTrue(55 < r["heartRateBpm"] < 90, r)  # heart rate stays normal: it's the probe
+        self.assertGreaterEqual(sim.step(5)[0]["spo2Percent"], 94)
+        self.assertEqual(len(sim.artifact_log), 1)
+        self.assertEqual(sim.artifact_log[0]["recordedAt"], r["recordedAt"])
+        self.assertEqual(sim.active_events("healthy"), [])  # physiology untouched
+
+    def test_artifact_on_other_vital_needs_value(self):
+        sim = VitalsSimulator([HEALTHY], start_time=START)
+        with self.assertRaises(ValueError):
+            sim.inject_artifact("healthy", "heartRateBpm")
+        with self.assertRaises(ValueError):
+            sim.inject_artifact("healthy", "bogus", 1)
+        sim.inject_artifact("healthy", "heartRateBpm", 190)
+        self.assertEqual(sim.step(5)[0]["heartRateBpm"], 190)
+
+
+class AdmissionTests(unittest.TestCase):
+    def test_encounter_and_bed_per_patient(self):
+        sim = VitalsSimulator(ward(3), start_time=START)
+        admissions = [sim.admission(f"p{i}") for i in range(3)]
+        self.assertEqual([a.bed_label for a in admissions], ["4W-01", "4W-02", "4W-03"])
+        self.assertEqual(len({a.encounter_id for a in admissions} | {a.location_id for a in admissions}), 6)
+        j = admissions[0].to_json()
+        self.assertEqual((j["status"], j["class"], j["location"]["display"]), ("in-progress", "IMP", "4W-01"))
+        r = sim.step(5)[0]
+        self.assertEqual(r["encounterId"], admissions[0].encounter_id)
+
+    def test_ids_deterministic_given_seed(self):
+        a = VitalsSimulator(ward(2), seed=5, start_time=START).admission("p1")
+        b = VitalsSimulator(ward(2), seed=5, start_time=START).admission("p1")
+        self.assertEqual(a, b)
+
+
+class DemoScriptTests(unittest.TestCase):
+    def test_demo_one_sepsis_one_false_alarm_rest_stable(self):
+        sim = VitalsSimulator(ward(6), start_time=START, event_rate_per_hour=0)
+        truth = schedule_demo(sim)
+        self.assertEqual(truth, {"sepsis": "p1", "falseAlarm": "p3"})
+        readings = []
+        for _ in range(8 * 60 // DEMO_TICK_MIN):
+            readings.extend(sim.step(DEMO_TICK_MIN * 60))
+        by_patient = {f"p{i}": [r for r in readings if r["patientId"] == f"p{i}"] for i in range(6)}
+
+        self.assertEqual([e.scenario for e in sim.active_events("p1")], ["sepsis"])
+        self.assertGreater(mean(by_patient["p1"][-4:], "heartRateBpm"), 95)
+        self.assertEqual([(a["patientId"], a["vital"]) for a in sim.artifact_log], [("p3", "spo2Percent")])
+        low = [r for r in by_patient["p3"] if r["spo2Percent"] < 90]
+        self.assertEqual(len(low), 1)
+        self.assertEqual(low[0]["recordedAt"], "2026-01-01T10:30:00.000Z")  # +2.5 h
+        for pid in ("p0", "p2", "p4", "p5"):
+            self.assertEqual(sim.active_events(pid), [])
+            self.assertTrue(all(r["spo2Percent"] >= 93 and r["consciousness"] == "A" for r in by_patient[pid]))
+
+
+@unittest.skipUnless(HAS_CLEAN_DATA, "no clean data - run server/Synthea_Gen/synthea.py and server/Synthea_Gen/transform.py")
+class CleanLoaderTests(unittest.TestCase):
+    def test_loads_scrubbed_patients(self):
+        patients = load_clean_patients()
         self.assertGreater(len(patients), 0)
-        self.assertEqual([p.room for p in patients], [str(401 + i) for i in range(len(patients))])
+        self.assertEqual([p.id for p in patients], sorted(p.id for p in patients))
         for p in patients:
-            self.assertNotRegex(p.first_name + p.last_name, r"\d")
-            self.assertFalse(any("(finding)" in c for c in p.conditions))
+            j = p.to_json()
+            self.assertEqual(set(j), {"id", "ageBand", "gender", "conditions", "medications", "lastVitals"})
+            self.assertRegex(p.age_band, r"^\d0-\d9$|^90\+$")
+            self.assertFalse(any("(" in c for c in p.conditions), p.conditions)
+
+    def test_missing_dir_raises(self):
+        with self.assertRaises(FileNotFoundError):
+            load_clean_patients(DEFAULT_CLEAN_DIR / "nope")
 
 
-@unittest.skipUnless((DEFAULT_CSV_DIR / "patients.csv").exists(), "no Synthea data - run server/Synthea_Gen/synthea.py")
 class ServerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from cli import SimServer
 
-        sim = VitalsSimulator(load_synthea_patients(), start_time=START, event_rate_per_hour=0)
+        sim = VitalsSimulator(ward(3), start_time=START, event_rate_per_hour=0)
         cls.server = SimServer(("127.0.0.1", 0), sim, interval_sec=0.05, speed=1)
         cls.server.start_ticking()
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
@@ -184,6 +271,8 @@ class ServerTests(unittest.TestCase):
         status, patients = self.request("/patients")
         self.assertEqual(status, 200)
         self.assertIn("baseline", patients[0])
+        self.assertEqual(patients[0]["encounter"]["location"]["display"], "4W-01")
+        self.assertNotIn("firstName", patients[0])
         status, vitals = self.request("/vitals")
         self.assertEqual(status, 200)
         self.assertEqual(len(vitals), len(patients))
@@ -210,6 +299,12 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request(f"/patients/{pid}/oxygen", {"on": "yes"})[0], 400)
         self.assertEqual(self.request(f"/patients/{pid}/consciousness", {"level": "X"})[0], 400)
         self.assertEqual(self.request(f"/patients/{pid}/consciousness", {})[0], 400)
+
+    def test_artifact_endpoint(self):
+        self.assertEqual(self.request("/patients/p2/artifact", {})[0], 200)
+        self.assertEqual(self.request("/patients/p2/artifact", {"vital": "heartRateBpm", "value": 190})[0], 200)
+        self.assertEqual(self.request("/patients/p2/artifact", {"vital": "heartRateBpm"})[0], 400)
+        self.assertEqual(self.request("/patients/nope/artifact", {})[0], 404)
 
     def test_sse_stream(self):
         with urllib.request.urlopen(self.base + "/stream", timeout=5) as resp:

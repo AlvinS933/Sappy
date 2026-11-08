@@ -1,19 +1,23 @@
-"""Continuous bedside-vitals simulator layered on top of Synthea patients.
+"""Continuous bedside-vitals simulator (pipeline step 3: simulate).
 
-Synthea only records a handful of outpatient vitals per patient (almost no SpO2/temperature), so
-this produces a live stream: each vital wanders around a per-patient baseline (Ornstein-Uhlenbeck
-process) plus measurement noise, and "scenarios" (sepsis, hypoxia, ...) push vitals away from
-baseline with an onset -> hold -> recovery envelope. Scenarios can be triggered manually (demo
-buttons) or occur randomly, weighted by the patient's conditions (COPD -> hypoxia, cardiac ->
-tachycardia, ...).
+Loads scrubbed patients from server/data/clean/ (written by server/Synthea_Gen/transform.py - no names,
+birthdates or addresses), admits each one (an in-progress inpatient Encounter + a bed Location,
+whose bed number is a display label only), then produces a live vitals stream.
+
+Synthea records almost no SpO2/temperature, so each vital wanders around a per-patient baseline
+(Ornstein-Uhlenbeck process) plus measurement noise. "Scenarios" (sepsis, hypoxia, ...) push vitals
+away from baseline with an onset -> hold -> recovery envelope; "artifacts" replace a single reading
+with an implausible value (e.g. a loose SpO2 probe) without touching the patient's physiology.
+Everything is deterministic given a seed.
 
 Standard library only; Python 3.9+.
 
-    from vitals_sim import VitalsSimulator, load_synthea_patients
+    from vitals_sim import VitalsSimulator, load_clean_patients
 
-    sim = VitalsSimulator(load_synthea_patients(), seed=1984)
+    sim = VitalsSimulator(load_clean_patients(), seed=1984, event_rate_per_hour=0)
     sim.trigger(sim.patients[0].id, "sepsis")
-    for readings in sim.stream(interval_sec=2, speed=30):
+    sim.inject_artifact(sim.patients[1].id)          # one-off SpO2 dip, next reading only
+    for readings in sim.stream(interval_sec=2, speed=450):
         ...
 
 Readings are dicts with camelCase keys matching `VitalsReading` in packages/shared, so they can be
@@ -22,18 +26,19 @@ sent to the apps as JSON unchanged.
 
 from __future__ import annotations
 
-import csv
+import json
 import math
 import random
 import re
 import time
+import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CSV_DIR = REPO_ROOT / "data" / "synthea" / "csv"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CLEAN_DIR = REPO_ROOT / "server" / "data" / "clean"
 
 # Continuous vitals. Readings also carry `onOxygen` (bool) and `consciousness` (ACVPU letter).
 VITAL_SIGNS = ("heartRateBpm", "systolicMmHg", "diastolicMmHg", "spo2Percent", "temperatureC", "respiratoryRate")
@@ -49,35 +54,53 @@ Reading = Dict[str, object]
 
 
 # ------------------------------------------------------------------------------------------------
-# Patients (loaded straight from Synthea CSV output)
+# Patients (scrubbed, from server/data/clean/)
 # ------------------------------------------------------------------------------------------------
 
 @dataclass
 class SimPatient:
-    id: str
-    first_name: str
-    last_name: str
-    room: str
-    birth_date: str  # YYYY-MM-DD
-    gender: str  # "M" | "F"
-    conditions: List[str] = field(default_factory=list)
+    """A scrubbed patient: pseudonymous id + age band, never names/birthdate/address (CLAUDE.md)."""
+
+    id: str  # pseudonymous Synthea Patient.id (random UUID)
+    age_band: str  # "70-79", "90+"
+    gender: str  # FHIR AdministrativeGender: "male" | "female" | "other" | "unknown"
+    conditions: List[str] = field(default_factory=list)  # active condition names
+    medications: List[str] = field(default_factory=list)  # active medication names
     last_vitals: Vitals = field(default_factory=dict)  # most recent Synthea values (any may be missing)
 
     @property
-    def display_name(self) -> str:
-        return f"{self.first_name} {self.last_name}"
+    def approx_age(self) -> float:
+        """Middle of the age band (used for age-dependent baselines)."""
+        m = re.match(r"(\d+)", self.age_band)
+        low = int(m.group(1)) if m else 50
+        return low + (2 if self.age_band.endswith("+") else 4.5)
 
     def to_json(self) -> dict:
-        """camelCase dict matching the shared TypeScript `Patient` shape (plus extras)."""
         return {
             "id": self.id,
-            "firstName": self.first_name,
-            "lastName": self.last_name,
-            "room": self.room,
-            "birthDate": self.birth_date,
+            "ageBand": self.age_band,
             "gender": self.gender,
             "conditions": self.conditions,
+            "medications": self.medications,
             "lastVitals": self.last_vitals,
+        }
+
+
+@dataclass(frozen=True)
+class Admission:
+    """In-progress inpatient Encounter (class IMP) at a bed Location. The bed label is display-only;
+    everything is keyed on patient/encounter ids, since patients transfer and beds get reused."""
+
+    encounter_id: str
+    location_id: str
+    bed_label: str
+
+    def to_json(self) -> dict:
+        return {
+            "id": self.encounter_id,
+            "status": "in-progress",
+            "class": "IMP",
+            "location": {"id": self.location_id, "display": self.bed_label},
         }
 
 
@@ -90,64 +113,39 @@ _VITAL_CODES = {
     "8310-5": "temperatureC",
     "9279-1": "respiratoryRate",
 }
-_IGNORED_CONDITIONS = re.compile(r"gingivitis|dental|teeth|molars|oral region", re.I)
-_NON_CLINICAL = re.compile(r"\((finding|situation|person)\)")
+_SEMANTIC_TAG = re.compile(r"\s*\((disorder|finding|situation|person|morphologic abnormality)\)\s*$")
 
 
-def _clean_name(s: str) -> str:
-    # Synthea appends digits to names to mark them synthetic ("Johnathan55").
-    return re.sub(r"\d+", "", s).strip()
+def _plain_name(display: str) -> str:
+    """'Essential hypertension (disorder)' -> 'Essential hypertension'."""
+    return re.sub(r"\s{2,}", " ", _SEMANTIC_TAG.sub("", display)).strip()
 
 
-def _read_csv(path: Path) -> List[dict]:
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
-def load_synthea_patients(csv_dir: Path | str = DEFAULT_CSV_DIR) -> List[SimPatient]:
-    """Load living patients from Synthea CSV output, with active conditions and latest vitals."""
-    csv_dir = Path(csv_dir)
-    if not (csv_dir / "patients.csv").exists():
-        raise FileNotFoundError(f"{csv_dir}/patients.csv not found - run server/Synthea_Gen/synthea.py first")
-
-    latest: Dict[str, Dict[str, tuple]] = {}
-    for o in _read_csv(csv_dir / "observations.csv"):
-        vital = _VITAL_CODES.get(o["CODE"])
-        if not vital:
-            continue
-        try:
-            value = float(o["VALUE"])
-        except ValueError:
-            continue
-        by_vital = latest.setdefault(o["PATIENT"], {})
-        if vital not in by_vital or o["DATE"] > by_vital[vital][0]:
-            by_vital[vital] = (o["DATE"], value)
-
-    conditions: Dict[str, set] = {}
-    for c in _read_csv(csv_dir / "conditions.csv"):
-        desc = c["DESCRIPTION"]
-        if c["STOP"] or _NON_CLINICAL.search(desc) or _IGNORED_CONDITIONS.search(desc):
-            continue
-        name = re.sub(r"\s{2,}", " ", re.sub(r"\s*\(disorder\)\s*$", "", desc)).strip()
-        conditions.setdefault(c["PATIENT"], set()).add(name)
-
-    rows = [p for p in _read_csv(csv_dir / "patients.csv") if not p["DEATHDATE"]]
-    # Synthea is multithreaded so row order varies between runs - sort so rooms are stable.
-    rows.sort(key=lambda p: (_clean_name(p["LAST"]), _clean_name(p["FIRST"]), p["Id"]))
-
-    return [
-        SimPatient(
-            id=p["Id"],
-            first_name=_clean_name(p["FIRST"]),
-            last_name=_clean_name(p["LAST"]),
-            room=str(401 + i),
-            birth_date=p["BIRTHDATE"],
-            gender="F" if p["GENDER"] == "F" else "M",
-            conditions=sorted(conditions.get(p["Id"], ())),
-            last_vitals={k: v for k, (_, v) in latest.get(p["Id"], {}).items()},
+def load_clean_patients(clean_dir: Path | str = DEFAULT_CLEAN_DIR) -> List[SimPatient]:
+    """Load scrubbed patients written by server/Synthea_Gen/transform.py, sorted by id (stable order)."""
+    files = sorted(Path(clean_dir).glob("*.json"))
+    if not files:
+        raise FileNotFoundError(
+            f"no clean patients in {clean_dir} - run server/Synthea_Gen/synthea.py then server/Synthea_Gen/transform.py"
         )
-        for i, p in enumerate(rows)
-    ]
+    patients = []
+    for path in files:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        last_vitals: Vitals = {}
+        for o in d.get("observations") or []:
+            vital = _VITAL_CODES.get(o.get("code"))
+            if vital and isinstance(o.get("value"), (int, float)) and not isinstance(o.get("value"), bool):
+                last_vitals[vital] = float(o["value"])
+        patients.append(SimPatient(
+            id=d["id"],
+            age_band=d["ageBand"],
+            gender=d.get("gender", "unknown"),
+            conditions=sorted({_plain_name(c["display"]) for c in d.get("conditions") or [] if c.get("display")}),
+            medications=sorted({m["display"] for m in d.get("medications") or [] if m.get("display")}),
+            last_vitals=last_vitals,
+        ))
+    return sorted(patients, key=lambda p: p.id)
 
 
 # ------------------------------------------------------------------------------------------------
@@ -163,6 +161,8 @@ class ScenarioSpec:
     recovery_min: float
     # Event intensity (severity x envelope) at which the patient becomes newly confused, if ever.
     confusion_at: Optional[float] = None
+    # Per-vital delay as a fraction of onset_min, for vitals that change late (e.g. BP in sepsis).
+    lag: Dict[str, float] = field(default_factory=dict)
 
 
 SCENARIOS: Dict[str, ScenarioSpec] = {
@@ -178,6 +178,8 @@ SCENARIOS: Dict[str, ScenarioSpec] = {
          "respiratoryRate": 10},
         45, 90, 120,
         confusion_at=0.8,
+        # HR, RR and temp rise first; SpO2 drifts down a bit later; SBP falls late.
+        lag={"spo2Percent": 0.25, "systolicMmHg": 0.75, "diastolicMmHg": 0.75},
     ),
     "tachycardia": ScenarioSpec(
         "Tachycardia", {"heartRateBpm": 50, "systolicMmHg": -8, "respiratoryRate": 2}, 2, 20, 10
@@ -247,11 +249,13 @@ _INFECTION_RISK = re.compile(r"diabetes|sepsis|kidney|urinary tract|neoplasm|tra
 @dataclass
 class _PatientState:
     patient: SimPatient
+    admission: Admission
     baseline: Vitals
     state: Vitals
     events: List[ActiveEvent] = field(default_factory=list)
     on_oxygen: bool = False
     consciousness_override: Optional[str] = None  # None = derived from physiology
+    pending_artifacts: Dict[str, float] = field(default_factory=dict)  # vital -> value for next reading
 
 
 # ------------------------------------------------------------------------------------------------
@@ -279,10 +283,18 @@ class VitalsSimulator:
         self._event_rate = event_rate_per_hour
         self._clock = time.time() if start_time is None else float(start_time)
         self._patients: Dict[str, _PatientState] = {}
-        for p in patients:
+        self._scheduled: List[Tuple[float, int, Callable[["VitalsSimulator"], None]]] = []
+        self._artifact_log: List[dict] = []
+        for i, p in enumerate(patients):
             # Baselines depend only on (seed, patient id) so they're stable regardless of list order.
-            baseline = _derive_baseline(p, random.Random(f"{seed}:{p.id}"), self._clock)
-            self._patients[p.id] = _PatientState(p, baseline, dict(baseline))
+            baseline = _derive_baseline(p, random.Random(f"{seed}:{p.id}"))
+            ids = random.Random(f"{seed}:admission:{p.id}")
+            admission = Admission(
+                encounter_id=str(uuid.UUID(int=ids.getrandbits(128), version=4)),
+                location_id=str(uuid.UUID(int=ids.getrandbits(128), version=4)),
+                bed_label=f"4W-{i + 1:02d}",
+            )
+            self._patients[p.id] = _PatientState(p, admission, baseline, dict(baseline))
 
     @property
     def now(self) -> float:
@@ -295,6 +307,32 @@ class VitalsSimulator:
 
     def baseline(self, patient_id: str) -> Vitals:
         return dict(self._get(patient_id).baseline)
+
+    def admission(self, patient_id: str) -> Admission:
+        return self._get(patient_id).admission
+
+    @property
+    def artifact_log(self) -> List[dict]:
+        """Ground truth for every artifact emitted so far: [{patientId, vital, value, recordedAt}]."""
+        return [dict(a) for a in self._artifact_log]
+
+    def inject_artifact(self, patient_id: str, vital: str = "spo2Percent", value: Optional[float] = None) -> None:
+        """Replace the patient's *next* reading of `vital` with a one-off implausible value - a false
+        alarm such as a loose SpO2 probe. Physiology is untouched, so the reading after is normal."""
+        state = self._get(patient_id)
+        if vital not in VITAL_SIGNS:
+            raise ValueError(f"unknown vital {vital!r}; expected one of {VITAL_SIGNS}")
+        if value is None:
+            if vital != "spo2Percent":
+                raise ValueError("pass a value for artifacts on vitals other than spo2Percent")
+            value = self._rng.randint(72, 80)  # probe slipping: sudden, deep, with a normal heart rate
+        state.pending_artifacts[vital] = value
+
+    def schedule(self, after_min: float, action: Callable[["VitalsSimulator"], None]) -> None:
+        """Run `action(sim)` at the first step whose sim time reaches now + after_min (for scripts)."""
+        due = self._clock + after_min * 60
+        self._scheduled.append((due, len(self._scheduled), action))
+        self._scheduled.sort(key=lambda t: (t[0], t[1]))
 
     def active_events(self, patient_id: str) -> List[ActiveEvent]:
         return [ActiveEvent(**asdict(e)) for e in self._get(patient_id).events]
@@ -359,6 +397,9 @@ class VitalsSimulator:
         self._clock += dt_sec
         recorded_at = _iso(self._clock)
         readings: List[Reading] = []
+        while self._scheduled and self._scheduled[0][0] <= self._clock:
+            _, _, action = self._scheduled.pop(0)
+            action(self)
 
         for s in self._patients.values():
             self._maybe_start_random_event(s, dt_sec)
@@ -367,13 +408,16 @@ class VitalsSimulator:
             still_active = []
             confused_by_event = False
             for e in s.events:
-                level = _envelope(e, self._clock)
-                if level is None:
+                spec = SCENARIOS[e.scenario]
+                onset_sec = e.onset_min * 60
+                # The event lasts until its most-delayed vital has recovered.
+                if _envelope(e, self._clock - max(spec.lag.values(), default=0.0) * onset_sec) is None:
                     continue
                 still_active.append(e)
-                spec = SCENARIOS[e.scenario]
+                level = _envelope(e, self._clock) or 0.0
                 for vital, offset in spec.offsets.items():
-                    target[vital] += offset * e.severity * level
+                    lagged = _envelope(e, self._clock - spec.lag[vital] * onset_sec) if vital in spec.lag else level
+                    target[vital] += offset * e.severity * (lagged or 0.0)
                 if spec.confusion_at is not None and e.severity * level >= spec.confusion_at:
                     confused_by_event = True
             s.events = still_active
@@ -394,8 +438,15 @@ class VitalsSimulator:
                 values[vital] = round(value, d.decimals) if d.decimals else int(round(value))
             # Keep pulse pressure physiological.
             values["diastolicMmHg"] = min(values["diastolicMmHg"], values["systolicMmHg"] - 25)
+            for vital, value in s.pending_artifacts.items():
+                values[vital] = value
+                self._artifact_log.append(
+                    {"patientId": s.patient.id, "vital": vital, "value": value, "recordedAt": recorded_at}
+                )
+            s.pending_artifacts.clear()
             readings.append({
                 "patientId": s.patient.id,
+                "encounterId": s.admission.encounter_id,
                 "recordedAt": recorded_at,
                 **values,
                 "onOxygen": s.on_oxygen,
@@ -432,12 +483,38 @@ class VitalsSimulator:
 
 
 # ------------------------------------------------------------------------------------------------
+# Scripted demo (CLAUDE.md "Demo goal")
+# ------------------------------------------------------------------------------------------------
+
+DEMO_TICK_MIN = 15  # one tick = 15 hospital minutes (every 2 s real time when served)
+
+
+def schedule_demo(sim: VitalsSimulator, sepsis_bed: int = 1, false_alarm_bed: int = 3) -> Dict[str, str]:
+    """Script the demo: most patients stay stable, one develops early sepsis, one gets a single
+    loose-probe SpO2 dip that should NOT be escalated. Use with event_rate_per_hour=0.
+
+    Timeline (sim time from now):
+      +1 h    sepsis starts on `sepsis_bed`: HR/RR/temp climb over ~4 h, SpO2 drifts down after
+              ~1 h, SBP falls late (~3 h in), new confusion ~2.5-3 h in. Holds until resolve().
+      +2.5 h  one implausible SpO2 reading (72-80%) on `false_alarm_bed`, normal again next tick.
+
+    Returns the ground truth {"sepsis": patient_id, "falseAlarm": patient_id}. Don't show it in the
+    nurse UI - it's for checking the alert worker's output (and labelling training data).
+    """
+    ids = [p.id for p in sim.patients]
+    sepsis_id = ids[sepsis_bed % len(ids)]
+    false_alarm_id = ids[false_alarm_bed % len(ids)]
+    sim.schedule(60, lambda s: s.trigger(sepsis_id, "sepsis", onset_min=240, hold_min=math.inf))
+    sim.schedule(150, lambda s: s.inject_artifact(false_alarm_id))
+    return {"sepsis": sepsis_id, "falseAlarm": false_alarm_id}
+
+
+# ------------------------------------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------------------------------------
 
-def _derive_baseline(p: SimPatient, rng: random.Random, now: float) -> Vitals:
-    birth = datetime.strptime(p.birth_date, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()
-    age = (now - birth) / (365.25 * 24 * 3600)
+def _derive_baseline(p: SimPatient, rng: random.Random) -> Vitals:
+    age = p.approx_age
     text = " | ".join(p.conditions)
     last = p.last_vitals
 

@@ -1,0 +1,45 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo. Secrets marked `sync: false`
+# are asked for once in the dashboard; they're never stored in this file.
+#
+# The simulator reads server/data/clean/ from the repo, so server/data/clean/ must be committed.
+# Free web services sleep after inactivity, which stops the tick loop - use a paid instance
+# (plan: starter) for anything you demo.
+
+services:
+  - type: web
+    name: vitals-simulator
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    # --demo: 1 tick every 2 s = 15 hospital minutes, scripted sepsis + false alarm.
+    # Add --reset to clear Supabase vitals/alerts on every start (including restarts/deploys).
+    startCommand: python server/sim/cli.py serve --demo --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: SIM_SEED
+        value: "1984"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      # Required for the POST demo controls (trigger/oxygen/...): send `Authorization: Bearer <token>`.
+      - key: SIM_CONTROL_TOKEN
+        generateValue: true
+
+  # NEWS2 alert worker: polls new `vitals` rows from Supabase every 2 s, writes `alerts`.
+  - type: worker
+    name: news2-alert-worker
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server/news2/alert_worker.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false

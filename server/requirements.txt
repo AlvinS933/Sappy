@@ -1,2 +1,0 @@
-# Python services on Render. The simulator and NEWS2 scoring are stdlib-only; the agent needs this.
-supabase==2.34.1

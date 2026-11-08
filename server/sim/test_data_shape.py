@@ -5,13 +5,13 @@ Run: python3 -m unittest discover server/sim -v   (or: pnpm test:sim)
 Sections:
   1. ReadingShapeTests   - each reading has the fields/types NEWS2 scoring will consume
   2. News2FieldTests     - the non-numeric NEWS2 inputs: onOxygen, consciousness
-  3. LoaderTests         - load_synthea_patients() against small hand-made CSVs
+  3. LoaderTests         - load_clean_patients() against small hand-made clean JSON files
   4. SimulatorTests      - simulator behaviour not covered by test_vitals_sim.py
 """
 
 from __future__ import annotations
 
-import csv
+import json
 import math
 import re
 import statistics
@@ -31,7 +31,7 @@ from vitals_sim import (  # noqa: E402
     _consciousness,
     _envelope,
     _scenario_weights,
-    load_synthea_patients,
+    load_clean_patients,
 )
 
 START = 1767254400.0  # 2026-01-01T08:00:00Z
@@ -54,7 +54,7 @@ NEWS2_KEYS = ("respiratoryRate", "spo2Percent", "onOxygen", "systolicMmHg", "hea
 
 def make_patient(**overrides) -> SimPatient:
     fields = dict(
-        id="p1", first_name="Test", last_name="Patient", room="1", birth_date="1980-01-01", gender="F",
+        id="p1", age_band="40-49", gender="female",
         conditions=[], last_vitals={"heartRateBpm": 70, "systolicMmHg": 120, "diastolicMmHg": 78},
     )
     fields.update(overrides)
@@ -130,10 +130,12 @@ class ReadingShapeTests(unittest.TestCase):
     def test_patient_json_shape(self):
         p = make_patient(conditions=["Hypertension"])
         j = p.to_json()
-        for key in ("id", "room", "gender", "conditions", "lastVitals"):
+        for key in ("id", "ageBand", "gender", "conditions", "medications", "lastVitals"):
             self.assertIn(key, j)
+        for key in ("firstName", "lastName", "birthDate", "room"):  # privacy: never in patient JSON
+            self.assertNotIn(key, j)
         self.assertIsInstance(j["conditions"], list)
-        self.assertIn(j["gender"], ("M", "F"))
+        self.assertIn(j["gender"], ("male", "female", "other", "unknown"))
 
 
 # ------------------------------------------------------------------------------------------------
@@ -228,17 +230,15 @@ class ConsciousnessDerivationTests(unittest.TestCase):
 # 3. Loader
 # ------------------------------------------------------------------------------------------------
 
-PATIENT_COLS = ["Id", "BIRTHDATE", "DEATHDATE", "FIRST", "LAST", "GENDER"]
-OBS_COLS = ["DATE", "PATIENT", "CODE", "DESCRIPTION", "VALUE", "UNITS"]
-COND_COLS = ["START", "STOP", "PATIENT", "CODE", "DESCRIPTION"]
+def clean_patient(pid: str, **overrides) -> dict:
+    """A patient file as written by server/Synthea_Gen/transform.py."""
+    d = {"id": pid, "ageBand": "60-69", "gender": "female", "conditions": [], "medications": [], "observations": []}
+    d.update(overrides)
+    return d
 
 
-def write_csv(path: Path, cols: list, rows: list) -> None:
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=cols)
-        w.writeheader()
-        for row in rows:
-            w.writerow({c: row.get(c, "") for c in cols})
+def obs(code: str, value, category: str = "vital-signs") -> dict:
+    return {"code": code, "display": code, "category": category, "value": value, "unit": "", "effectiveDate": "2025-01-01"}
 
 
 class LoaderTests(unittest.TestCase):
@@ -246,27 +246,24 @@ class LoaderTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self._tmp.name)
         self.patients = [
-            {"Id": "id-b", "FIRST": "Zoe12", "LAST": "Baker34", "BIRTHDATE": "1950-02-03", "GENDER": "F"},
-            {"Id": "id-a", "FIRST": "Amy5", "LAST": "Adams8", "BIRTHDATE": "1960-04-05", "GENDER": "F"},
-            {"Id": "id-dead", "FIRST": "Dan1", "LAST": "Dead2", "BIRTHDATE": "1940-01-01",
-             "DEATHDATE": "2020-01-01", "GENDER": "M"},
-        ]
-        self.observations = [
-            {"DATE": "2024-01-01T00:00:00Z", "PATIENT": "id-a", "CODE": "8867-4", "VALUE": "60"},
-            {"DATE": "2025-01-01T00:00:00Z", "PATIENT": "id-a", "CODE": "8867-4", "VALUE": "88"},  # latest
-            {"DATE": "2023-01-01T00:00:00Z", "PATIENT": "id-a", "CODE": "8867-4", "VALUE": "70"},
-            {"DATE": "2025-01-01T00:00:00Z", "PATIENT": "id-a", "CODE": "8480-6", "VALUE": "not-a-number"},
-            {"DATE": "2025-01-01T00:00:00Z", "PATIENT": "id-a", "CODE": "59408-5", "VALUE": "96"},
-            {"DATE": "2025-01-01T00:00:00Z", "PATIENT": "id-a", "CODE": "9279-1", "VALUE": "16"},
-            {"DATE": "2025-01-01T00:00:00Z", "PATIENT": "id-a", "CODE": "39156-5", "VALUE": "27.1"},  # BMI: ignored
-        ]
-        self.conditions = [
-            {"PATIENT": "id-a", "DESCRIPTION": "Essential hypertension (disorder)"},
-            {"PATIENT": "id-a", "DESCRIPTION": "Acute bronchitis (disorder)", "STOP": "2024-02-01"},
-            {"PATIENT": "id-a", "DESCRIPTION": "Body mass index 30+ - obesity (finding)"},
-            {"PATIENT": "id-a", "DESCRIPTION": "Full-time employment (situation)"},
-            {"PATIENT": "id-a", "DESCRIPTION": "Gingivitis (disorder)"},
-            {"PATIENT": "id-a", "DESCRIPTION": "Essential hypertension (disorder)"},  # duplicate
+            clean_patient("id-b", ageBand="70-79"),
+            clean_patient(
+                "id-a",
+                conditions=[
+                    {"system": "http://snomed.info/sct", "code": "1", "display": "Essential hypertension (disorder)"},
+                    {"system": "http://snomed.info/sct", "code": "2", "display": "Prediabetes (finding)"},
+                    {"system": "http://snomed.info/sct", "code": "3", "display": "Essential  hypertension"},  # dup
+                ],
+                medications=[{"system": "rxnorm", "code": "9", "display": "Metformin 500 MG Oral Tablet"}],
+                observations=[
+                    obs("8867-4", 88),
+                    obs("8480-6", "not-a-number"),
+                    obs("59408-5", 96),
+                    obs("9279-1", 16),
+                    obs("39156-5", 27.1),  # BMI: not a simulated vital, ignored
+                    obs("2339-0", 101, "laboratory"),  # glucose: ignored
+                ],
+            ),
         ]
         self.write()
 
@@ -274,49 +271,43 @@ class LoaderTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def write(self):
-        write_csv(self.dir / "patients.csv", PATIENT_COLS, self.patients)
-        write_csv(self.dir / "observations.csv", OBS_COLS, self.observations)
-        write_csv(self.dir / "conditions.csv", COND_COLS, self.conditions)
+        for p in self.patients:
+            (self.dir / f"{p['id']}.json").write_text(json.dumps(p))
 
     def load(self) -> dict:
-        return {p.id: p for p in load_synthea_patients(self.dir)}
+        return {p.id: p for p in load_clean_patients(self.dir)}
 
-    def test_missing_patients_csv_raises(self):
+    def test_missing_or_empty_dir_raises(self):
         with self.assertRaises(FileNotFoundError):
-            load_synthea_patients(self.dir / "nope")
+            load_clean_patients(self.dir / "nope")
 
-    def test_deceased_patients_dropped(self):
-        self.assertEqual(set(self.load()), {"id-a", "id-b"})
+    def test_all_patients_loaded_sorted_by_id(self):
+        self.assertEqual([p.id for p in load_clean_patients(self.dir)], ["id-a", "id-b"])
 
-    def test_synthea_digits_stripped_from_names(self):
-        a = self.load()["id-a"]
-        self.assertEqual((a.first_name, a.last_name), ("Amy", "Adams"))
+    def test_age_band_and_gender_kept(self):
+        b = self.load()["id-b"]
+        self.assertEqual((b.age_band, b.gender), ("70-79", "female"))
 
-    def test_conditions_filtered_and_cleaned(self):
-        # Active only, no (finding)/(situation), no dental, "(disorder)" suffix removed, de-duplicated.
-        self.assertEqual(self.load()["id-a"].conditions, ["Essential hypertension"])
+    def test_conditions_tag_stripped_and_deduplicated(self):
+        self.assertEqual(self.load()["id-a"].conditions, ["Essential hypertension", "Prediabetes"])
+
+    def test_medications_loaded(self):
+        self.assertEqual(self.load()["id-a"].medications, ["Metformin 500 MG Oral Tablet"])
 
     def test_patient_with_no_conditions_gets_empty_list(self):
         self.assertEqual(self.load()["id-b"].conditions, [])
 
-    def test_latest_vital_wins_and_bad_values_skipped(self):
+    def test_vitals_mapped_by_loinc_and_bad_values_skipped(self):
         a = self.load()["id-a"]
         self.assertEqual(a.last_vitals, {"heartRateBpm": 88.0, "spo2Percent": 96.0, "respiratoryRate": 16.0})
 
     def test_patient_with_no_vitals_gets_empty_dict(self):
         self.assertEqual(self.load()["id-b"].last_vitals, {})
 
-    def test_rooms_assigned_by_name_and_stable_across_row_order(self):
-        first = {pid: p.room for pid, p in self.load().items()}
-        self.assertEqual(first, {"id-a": "401", "id-b": "402"})  # Adams before Baker
-        self.patients.reverse()
-        self.write()
-        self.assertEqual({pid: p.room for pid, p in self.load().items()}, first)
-
-    def test_gender_normalised(self):
-        self.patients[0]["GENDER"] = "X"
-        self.write()
-        self.assertEqual(self.load()["id-b"].gender, "M")  # anything not "F" becomes "M"
+    def test_bed_labels_follow_patient_order_and_are_not_keys(self):
+        sim = quiet_sim(load_clean_patients(self.dir))
+        self.assertEqual([sim.admission(i).bed_label for i in ("id-a", "id-b")], ["4W-01", "4W-02"])
+        self.assertEqual(sim.step(5)[0]["patientId"], "id-a")
 
 
 # ------------------------------------------------------------------------------------------------
@@ -341,8 +332,8 @@ class BaselineTests(unittest.TestCase):
         self.assertTrue(110 <= base["systolicMmHg"] <= 160)
 
     def test_spo2_baseline_by_age_and_lung_disease(self):
-        young = quiet_sim([make_patient(birth_date="1990-01-01")]).baseline("p1")["spo2Percent"]
-        old = quiet_sim([make_patient(birth_date="1940-01-01")]).baseline("p1")["spo2Percent"]
+        young = quiet_sim([make_patient(age_band="30-39")]).baseline("p1")["spo2Percent"]
+        old = quiet_sim([make_patient(age_band="80-89")]).baseline("p1")["spo2Percent"]
         copd = quiet_sim([make_patient(conditions=["Chronic obstructive bronchitis"])]).baseline("p1")["spo2Percent"]
         self.assertTrue(97 <= young <= 99, young)
         self.assertTrue(95.5 <= old <= 97.5, old)
