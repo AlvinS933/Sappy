@@ -108,9 +108,12 @@ pnpm test:alerts     #    alert worker tests (fake Supabase client, no network)
 2. **Render**: New -> Blueprint -> this repo (`render.yaml`): simulator + alert worker. Set
    `SUPABASE_URL` and `SUPABASE_SECRET_KEY` on both. `server/data/clean/` must be committed. Free instances sleep and stop the
    simulator, so demo on a paid instance. Demo controls need `Authorization: Bearer $SIM_CONTROL_TOKEN`.
-3. **Vercel**: import the repo, Root Directory `apps/nurse-web` (Vite is auto-detected). Set
-   `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. If install fails on the pinned pnpm
-   version, add `ENABLE_EXPERIMENTAL_COREPACK=1`.
+3. **Vercel**: import the repo, set Root Directory to `apps/nurse-web` (keep "Include files outside
+   the root directory" on; the app needs `packages/shared` and the root lockfile). Install/build
+   commands come from `apps/nurse-web/vercel.json`: they run the pinned pnpm via `npx`, because
+   Vercel otherwise picks pnpm 9/10 from the lockfile and pnpm 9 can't read our pnpm 12 lockfile.
+   Keep its `pnpm@x.y.z` in sync with `packageManager` in the root `package.json`. Set
+   `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in Vercel's Environment Variables.
 
 ## Privacy rules (non-negotiable)
 

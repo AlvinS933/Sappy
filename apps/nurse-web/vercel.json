@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "npx -y pnpm@12.18.0 install --frozen-lockfile --filter nurse-web...",
+  "buildCommand": "npx -y pnpm@12.18.0 run build",
+  "outputDirectory": "dist"
+}
