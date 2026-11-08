@@ -1,17 +1,21 @@
-"""NEWS2 alert worker: reads new `vitals` rows from Supabase, scores them, writes `alerts`.
+"""NEWS2 alert worker: watches the `vitals` table in Supabase, scores readings, writes `alerts`.
 
-    python3 server/news2/alert_worker.py                 # follow new vitals (skips the existing backlog)
-    python3 server/news2/alert_worker.py --from-start    # also score every vitals row already in the table
+    python3 server/news2/alert_worker.py
 
 Needs SUPABASE_URL + SUPABASE_SECRET_KEY (legacy SUPABASE_SERVICE_ROLE_KEY also works), from the
-environment or a .env file at the repo root. The secret key bypasses Row Level Security, so this
-must only run server-side (Render worker or a laptop), never in a browser.
+environment or the repo-root .env. The secret key bypasses Row Level Security, so this must only
+run server-side (Render worker or a laptop), never in a browser.
+
+`vitals` holds only the LATEST reading per patient: the simulator overwrites each patient's row
+every tick (2 s). So every poll reads all rows and scores the ones whose `recorded_at` changed.
+Polling at 1 s (twice per tick) means a slightly late poll doesn't miss a reading.
 
 Alert rule (fewer, better alerts):
   - News2Monitor confirms a tier only after it has held for 2 readings (one bad reading is suppressed).
   - An `alerts` row is written only when a patient's confirmed tier rises above the last tier we
-    alerted for. Holding a tier doesn't repeat the alert; dropping lowers the bar, so a later
-    re-escalation alerts again.
+    alerted for. Holding a tier doesn't repeat the alert.
+  - The bar only drops after the patient has stayed below it for RESET_AFTER readings, so a vital
+    wobbling across a band edge (pulse 90 <-> 91) doesn't re-alert every few minutes.
 """
 
 from __future__ import annotations
@@ -24,15 +28,19 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-ROOT = Path(__file__).resolve().parents[2]  # repo root (for .env)
+SERVER_DIR = Path(__file__).resolve().parent.parent  # server/
+REPO_ROOT = SERVER_DIR.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+if str(SERVER_DIR) not in sys.path:
+    sys.path.append(str(SERVER_DIR))  # for server/pylib/
 
 from scoring import News2Monitor, spo2_scale_for  # noqa: E402
+from pylib.env import load_dotenv  # noqa: E402
 
 log = logging.getLogger("alert-worker")
 
-# The simulator writes one vitals row per patient every 2 s (one tick); poll at the same rate.
-POLL_SECONDS = 2.0
+POLL_SECONDS = 1.0  # the simulator writes every 2 s; polling twice per tick never misses one
+RESET_AFTER = 8  # readings below the last alerted tier before it can alert again (8 ticks = 2 h sim)
 
 TIER_RANK = {"none": 0, "watch": 1, "check soon": 2, "go now": 3}
 
@@ -59,14 +67,14 @@ def reading_from_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class AlertWorker:
-    def __init__(self, client: Any, batch_size: int = 500) -> None:
+    def __init__(self, client: Any) -> None:
         """`client` is a supabase.Client (or a fake with the same .table() API, for tests)."""
         self.client = client
-        self.batch_size = batch_size
         self.monitor = News2Monitor()
         self.known_patients: set = set()
+        self.last_seen: Dict[str, str] = {}  # patient_id -> recorded_at of the last reading scored
         self.last_alerted: Dict[str, str] = {}  # patient_id -> tier of the last alert written
-        self.last_vitals_id = 0
+        self.below_count: Dict[str, int] = {}  # patient_id -> readings in a row below last_alerted
 
     # --- Supabase reads/writes -----------------------------------------------------------------
 
@@ -79,16 +87,8 @@ class AlertWorker:
             self.monitor.set_spo2_scale(p["id"], spo2_scale_for(p.get("conditions") or []))
             self.known_patients.add(p["id"])
 
-    def skip_backlog(self) -> None:
-        rows = self.client.table("vitals").select("id").order("id", desc=True).limit(1).execute().data
-        self.last_vitals_id = rows[0]["id"] if rows else 0
-
     def fetch_vitals(self) -> List[dict]:
-        return (
-            self.client.table("vitals").select("*")
-            .gt("id", self.last_vitals_id).order("id").limit(self.batch_size)
-            .execute().data
-        )
+        return self.client.table("vitals").select("*").execute().data
 
     def write_alerts(self, alerts: List[dict]) -> None:
         if alerts:
@@ -96,71 +96,78 @@ class AlertWorker:
 
     # --- Scoring -------------------------------------------------------------------------------
 
+    def forget(self, pid: str) -> None:
+        """Start a patient over (e.g. the simulator restarted and its clock went back)."""
+        self.monitor.reset(pid)
+        for state in (self.last_alerted, self.below_count):
+            state.pop(pid, None)
+
     def process(self, rows: List[dict]) -> List[dict]:
-        """Score vitals rows in id order; return the alert rows to insert."""
-        new_ids = {r["patient_id"] for r in rows} - self.known_patients
-        if new_ids:
-            self.load_patients(new_ids)
+        """Score rows whose reading is new since the last poll; return the alert rows to insert."""
+        new = [r for r in rows if r["recorded_at"] != self.last_seen.get(r["patient_id"])]
+        new.sort(key=lambda r: r["recorded_at"])
+
+        unknown = {r["patient_id"] for r in new} - self.known_patients
+        if unknown:
+            self.load_patients(unknown)
 
         alerts = []
-        for row in rows:
-            self.last_vitals_id = max(self.last_vitals_id, row["id"])
+        for row in new:
             pid = row["patient_id"]
+            prev_seen = self.last_seen.get(pid)
+            self.last_seen[pid] = row["recorded_at"]
+            if prev_seen is not None and row["recorded_at"] < prev_seen:
+                log.info("clock went back for %s (simulator restart?); starting over", pid)
+                self.forget(pid)
             try:
                 res = self.monitor.update(reading_from_row(row))
             except ValueError as e:
-                log.warning("skipping vitals %s: %s", row["id"], e)
+                log.warning("skipping vitals for %s at %s: %s", pid, row["recorded_at"], e)
                 continue
 
             if res.suppressed:
                 log.info("suppressed %s: %s (NEWS2 %d) held at %s",
                          pid, res.news2.tier, res.news2.total, res.alert_tier)
 
-            prev = self.last_alerted.get(pid, "none")
-            if TIER_RANK[res.alert_tier] > TIER_RANK[prev]:
+            tier, bar = res.alert_tier, self.last_alerted.get(pid, "none")
+            if TIER_RANK[tier] > TIER_RANK[bar]:
                 alerts.append({
                     "patient_id": pid,
                     "encounter_id": row["encounter_id"],
-                    "tier": res.alert_tier,
+                    "tier": tier,
                     "news2_score": res.news2.total,
                     "reason": "; ".join(res.news2.reasons) or "NEWS2 tier confirmed",
                 })
-                log.info("ALERT %s: %s (NEWS2 %d)", pid, res.alert_tier, res.news2.total)
-            self.last_alerted[pid] = res.alert_tier
+                log.info("ALERT %s: %s (NEWS2 %d)", pid, tier, res.news2.total)
+                self.last_alerted[pid], self.below_count[pid] = tier, 0
+            elif TIER_RANK[tier] < TIER_RANK[bar]:
+                self.below_count[pid] = self.below_count.get(pid, 0) + 1
+                if self.below_count[pid] >= RESET_AFTER:
+                    self.last_alerted[pid], self.below_count[pid] = tier, 0
+            else:
+                self.below_count[pid] = 0
         return alerts
 
     def poll_once(self) -> int:
-        rows = self.fetch_vitals()
-        self.write_alerts(self.process(rows))
-        return len(rows)
+        alerts = self.process(self.fetch_vitals())
+        self.write_alerts(alerts)
+        return len(alerts)
 
-    def run(self, interval: float, from_start: bool = False) -> None:
+    def run(self, interval: float) -> None:
         self.load_patients()
-        if not from_start:
-            self.skip_backlog()
-        log.info("watching vitals after id %d (%d patients)", self.last_vitals_id, len(self.known_patients))
+        # Don't score whatever is already in the table: it may be minutes old.
+        for row in self.fetch_vitals():
+            self.last_seen[row["patient_id"]] = row["recorded_at"]
+        log.info("watching vitals for %d patients, polling every %gs", len(self.known_patients), interval)
         while True:
             try:
-                n = self.poll_once()
+                self.poll_once()
             except Exception:  # network blips shouldn't kill the worker
                 log.exception("poll failed; retrying")
-                n = 0
-            if n < self.batch_size:
-                time.sleep(interval)
+            time.sleep(interval)
 
 
 # --- Entry point -------------------------------------------------------------------------------
-
-def load_dotenv(path: Path) -> None:
-    """Minimal .env reader: KEY=VALUE lines; real environment variables win."""
-    if not path.exists():
-        return
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-
 
 def make_client() -> Any:
     url = os.environ.get("SUPABASE_URL")
@@ -174,13 +181,12 @@ def make_client() -> Any:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--interval", type=float, default=POLL_SECONDS,
-                    help=f"seconds between polls (default {POLL_SECONDS:g}, one simulator tick)")
-    ap.add_argument("--from-start", action="store_true", help="score existing vitals rows too")
+                    help=f"seconds between polls (default {POLL_SECONDS:g})")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    load_dotenv(ROOT / ".env")
-    AlertWorker(make_client()).run(args.interval, args.from_start)
+    load_dotenv(REPO_ROOT / ".env")
+    AlertWorker(make_client()).run(args.interval)
 
 
 if __name__ == "__main__":

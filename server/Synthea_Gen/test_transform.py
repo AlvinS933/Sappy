@@ -182,9 +182,7 @@ class RunTests(unittest.TestCase):
 class RealDataTests(unittest.TestCase):
     def test_every_clean_file_is_scrubbed_against_its_raw_patient(self):
         raw_patients = {}
-        for path in t.DEFAULT_RAW.glob("*.json"):
-            if path.name.startswith(("hospitalInformation", "practitionerInformation")):
-                continue
+        for path in t.bundle_files(t.DEFAULT_RAW):
             for e in json.loads(path.read_text())["entry"]:
                 if e["resource"]["resourceType"] == "Patient":
                     raw_patients[e["resource"]["id"]] = e["resource"]

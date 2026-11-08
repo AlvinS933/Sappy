@@ -6,14 +6,15 @@
     python3 server/sim/cli.py serve --speed 30          # free-running (random events) on http://127.0.0.1:8765
     python3 server/sim/cli.py stream --speed 30         # JSON lines on stdout (one batch per line)
 
-Patients come from server/data/clean/ (scrubbed by server/Synthea_Gen/transform.py). Each is admitted to a bed;
-the bed label is display-only - key everything on patientId / encounterId.
+Patients come from server/data/clean/ (scrubbed by server/Synthea_Gen/transform.py). Only the 5-patient ward
+(DEMO_WARD in vitals_sim.py, or --patient-ids / SIM_PATIENT_IDS=id1,id2,...) is simulated. Each is
+admitted to a bed; the bed label is display-only - key everything on patientId / encounterId.
 
-`serve` also writes every tick to Supabase (server/sim/supabase_sink.py) when SUPABASE_URL and
+`serve` also writes every tick to Supabase (sim/supabase_sink.py) when SUPABASE_URL and
 SUPABASE_SECRET_KEY are set (needs the venv: pip install -r requirements.txt).
-If SIM_CONTROL_TOKEN is set, POST endpoints need `Authorization: Bearer <token>`.
 
-Server endpoints (CORS open, for local dev only):
+Server endpoints. CORS is open; on a public host (Render) set SIM_CONTROL_TOKEN so the POSTs need
+`Authorization: Bearer <token>`:
     GET  /health                       {"ok": true, "supabase": bool} (Render health check)
     GET  /patients                     patients (+ encounter/bed, baseline, active events)
     GET  /scenarios                    available scenario names
@@ -27,7 +28,7 @@ Server endpoints (CORS open, for local dev only):
 
 From the browser:
     const es = new EventSource('http://127.0.0.1:8765/stream')
-    es.onmessage = (e) => setVitals(JSON.parse(e.data))   // VitalsReading[]`
+    es.onmessage = (e) => setVitals(JSON.parse(e.data))   // VitalsReading[]
 """
 
 from __future__ import annotations
@@ -43,26 +44,44 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any, Callable, Dict, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from vitals_sim import (  # noqa: E402
-    REPO_ROOT,
+from vitals_sim import (  # noqa: E402  (also puts the repo root on sys.path for pylib)
     DEFAULT_CLEAN_DIR,
+    DEMO_FALSE_ALARM_AT_MIN,
+    DEMO_INTERVAL_SEC,
+    DEMO_SEPSIS_AT_MIN,
+    DEMO_SPEED,
     DEMO_TICK_MIN,
+    DEMO_WARD,
+    REPO_ROOT,
     SCENARIOS,
     VitalsSimulator,
     load_clean_patients,
     schedule_demo,
+    select_ward,
 )
-from supabase_sink import SupabaseSink  # noqa: E402
+from pylib.env import load_dotenv  # noqa: E402
+from supabase_sink import BackgroundWriter, SupabaseSink  # noqa: E402
 
 
 # ------------------------------------------------------------------------------------------------
 # demo / stream
 # ------------------------------------------------------------------------------------------------
 
+def load_ward(args: argparse.Namespace) -> list:
+    """The patients to simulate: DEMO_WARD (5 patients), or --patient-ids if given."""
+    ids = tuple(i.strip() for i in args.patient_ids.split(",") if i.strip()) or DEMO_WARD
+    ward, found = select_ward(load_clean_patients(args.clean_dir), ids)
+    if not found:
+        print(f"warning: ward patient ids not in {args.clean_dir}; using the first {len(ward)} by id instead",
+              file=sys.stderr, flush=True)
+    return ward
+
+
 def cmd_demo(args: argparse.Namespace) -> None:
-    patients = load_clean_patients(args.clean_dir)[: args.patients]
+    patients = load_ward(args)
     start = datetime(2026, 1, 1, 8, tzinfo=timezone.utc).timestamp()
     sim = VitalsSimulator(patients, seed=args.seed, start_time=start, event_rate_per_hour=0)
     truth = schedule_demo(sim)
@@ -88,7 +107,7 @@ def cmd_demo(args: argparse.Namespace) -> None:
 
 
 def cmd_stream(args: argparse.Namespace) -> None:
-    sim = VitalsSimulator(load_clean_patients(args.clean_dir), seed=args.seed, event_rate_per_hour=args.event_rate)
+    sim = VitalsSimulator(load_ward(args), seed=args.seed, event_rate_per_hour=args.event_rate)
     try:
         for readings in sim.stream(interval_sec=args.interval, speed=args.speed):
             print(json.dumps(readings), flush=True)
@@ -108,11 +127,12 @@ class SimServer(ThreadingHTTPServer):
         super().__init__(address, Handler)
         self.sim = sim
         self.sink = sink  # SupabaseSink or None
+        self.writer = BackgroundWriter(sink) if sink is not None else None
         self.control_token = control_token
-        self.sink_failures = 0
-        self.lock = threading.Lock()
-        self.tick = threading.Condition()
+        self.lock = threading.Lock()  # guards self.sim
+        self.tick = threading.Condition()  # guards latest / latest_frame / seq
         self.latest: list = []
+        self.latest_frame = b""  # latest batch as an SSE frame, encoded once for every client
         self.seq = 0
         self.stopped = threading.Event()
         self._ticker = threading.Thread(target=self._run, args=(interval_sec, speed), daemon=True)
@@ -125,29 +145,72 @@ class SimServer(ThreadingHTTPServer):
         while not self.stopped.is_set():
             with self.lock:
                 readings = self.sim.step(interval_sec * speed)
+            frame = f"data: {json.dumps(readings)}\n\n".encode()
             with self.tick:
-                self.latest, self.seq = readings, self.seq + 1
+                self.latest, self.latest_frame, self.seq = readings, frame, self.seq + 1
                 self.tick.notify_all()
-            self._write_sink(readings)
+            if self.writer:
+                self.writer.submit(readings)
             next_tick += interval_sec
-            self.stopped.wait(max(0.0, next_tick - time.monotonic()))
-
-    def _write_sink(self, readings: list) -> None:
-        if self.sink is None:
-            return
-        try:
-            self.sink.write(readings)
-            if self.sink_failures:
-                print(f"supabase: writes recovered after {self.sink_failures} failures", flush=True)
-            self.sink_failures = 0
-        except Exception as e:  # keep ticking; the SSE stream still works without Supabase
-            self.sink_failures += 1
-            if self.sink_failures == 1 or self.sink_failures % 30 == 0:
-                print(f"supabase: write failed ({self.sink_failures}x): {e}", file=sys.stderr, flush=True)
+            now = time.monotonic()
+            if next_tick < now - interval_sec:  # fell behind (e.g. laptop slept): skip, don't replay
+                next_tick = now
+            self.stopped.wait(max(0.0, next_tick - now))
 
     def server_close(self) -> None:
         self.stopped.set()
+        if self.writer:
+            self.writer.close()
         super().server_close()
+
+
+# POST /patients/<id>/<action> handlers: validate the body, act, return a JSON body (None = {"ok": true}).
+# ValueError -> 400, KeyError (unknown patient) -> 404.
+
+def _post_trigger(sim: VitalsSimulator, patient_id: str, body: dict) -> Optional[dict]:
+    if "scenario" not in body:
+        raise ValueError(f"body needs 'scenario', one of {sorted(SCENARIOS)}")
+    return sim.trigger(
+        patient_id,
+        body["scenario"],
+        severity=float(body.get("severity", 1)),
+        hold_min=math.inf if body.get("untilResolved") else body.get("holdMin"),
+    ).to_json()
+
+
+def _post_resolve(sim: VitalsSimulator, patient_id: str, body: dict) -> None:
+    sim.resolve(patient_id, body.get("scenario"))
+
+
+def _post_oxygen(sim: VitalsSimulator, patient_id: str, body: dict) -> None:
+    if not isinstance(body.get("on"), bool):
+        raise ValueError("body needs 'on': true or false")
+    sim.set_oxygen(patient_id, body["on"])
+
+
+def _post_consciousness(sim: VitalsSimulator, patient_id: str, body: dict) -> None:
+    if "level" not in body:
+        raise ValueError("body needs 'level': one of A, C, V, P, U, or null for automatic")
+    sim.set_consciousness(patient_id, body["level"])
+
+
+def _post_artifact(sim: VitalsSimulator, patient_id: str, body: dict) -> None:
+    kwargs: Dict[str, Any] = {}
+    if "vital" in body:
+        kwargs["vital"] = body["vital"]
+    if body.get("value") is not None:
+        kwargs["value"] = float(body["value"])
+    sim.inject_artifact(patient_id, **kwargs)
+
+
+POST_ACTIONS: Dict[str, Callable[[VitalsSimulator, str, dict], Optional[dict]]] = {
+    "trigger": _post_trigger,
+    "resolve": _post_resolve,
+    "oxygen": _post_oxygen,
+    "consciousness": _post_consciousness,
+    "artifact": _post_artifact,
+}
+_POST_ROUTE = re.compile(rf"/patients/([^/]+)/({'|'.join(POST_ACTIONS)})")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -209,14 +272,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {k: v.label for k, v in SCENARIOS.items()})
         elif path == "/vitals":
             with self.server.tick:
-                self._json(200, self.server.latest)
+                latest = self.server.latest
+            self._json(200, latest)  # send outside the lock so a slow client can't stall the ticker
         elif path == "/stream":
             self._sse()
         else:
             self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
-        m = re.fullmatch(r"/patients/([^/]+)/(trigger|resolve|oxygen|consciousness|artifact)", self.path.split("?")[0])
+        m = _POST_ROUTE.fullmatch(self.path.split("?")[0])
         if not m:
             return self._json(404, {"error": "not found"})
         patient_id, action = m.groups()
@@ -225,34 +289,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {"error": "missing or wrong Authorization: Bearer <SIM_CONTROL_TOKEN>"})
         try:
             body = self._body()
-            if action == "trigger" and "scenario" not in body:
-                return self._json(400, {"error": f"body needs 'scenario', one of {sorted(SCENARIOS)}"})
-            if action == "oxygen" and not isinstance(body.get("on"), bool):
-                return self._json(400, {"error": "body needs 'on': true or false"})
-            if action == "consciousness" and "level" not in body:
-                return self._json(400, {"error": "body needs 'level': one of A, C, V, P, U, or null for automatic"})
-            sim = self.server.sim
             with self.server.lock:
-                if action == "trigger":
-                    event = sim.trigger(
-                        patient_id,
-                        body["scenario"],
-                        severity=float(body.get("severity", 1)),
-                        hold_min=math.inf if body.get("untilResolved") else body.get("holdMin"),
-                    )
-                    return self._json(200, event.to_json())
-                if action == "resolve":
-                    sim.resolve(patient_id, body.get("scenario"))
-                elif action == "oxygen":
-                    sim.set_oxygen(patient_id, body["on"])
-                elif action == "artifact":
-                    value = body.get("value")
-                    sim.inject_artifact(
-                        patient_id, body.get("vital", "spo2Percent"), None if value is None else float(value)
-                    )
-                else:
-                    sim.set_consciousness(patient_id, body["level"])
-            self._json(200, {"ok": True})
+                result = POST_ACTIONS[action](self.server.sim, patient_id, body)
+            self._json(200, {"ok": True} if result is None else result)
         except KeyError as e:  # unknown patient id
             self._json(404, {"error": str(e).strip("'\"")})
         except (ValueError, json.JSONDecodeError) as e:
@@ -271,21 +310,19 @@ class Handler(BaseHTTPRequestHandler):
             while not self.server.stopped.is_set():
                 with self.server.tick:
                     self.server.tick.wait_for(lambda: self.server.seq != seen or self.server.stopped.is_set(), timeout=15)
-                    seq, readings = self.server.seq, self.server.latest
+                    seq, frame = self.server.seq, self.server.latest_frame
                 if seq == seen:
                     self.wfile.write(b": keep-alive\n\n")
                 else:
                     seen = seq
-                    self.wfile.write(f"data: {json.dumps(readings)}\n\n".encode())
+                    self.wfile.write(frame)
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
 
 
 def cmd_serve(args: argparse.Namespace) -> None:
-    if args.demo:  # CLAUDE.md: 1 tick every 2 s real time = 15 min hospital time, no random events
-        args.interval, args.speed, args.event_rate = 2.0, DEMO_TICK_MIN * 60 / 2.0, 0.0
-    sim = VitalsSimulator(load_clean_patients(args.clean_dir), seed=args.seed, event_rate_per_hour=args.event_rate)
+    sim = VitalsSimulator(load_ward(args), seed=args.seed, event_rate_per_hour=args.event_rate)
     truth = schedule_demo(sim) if args.demo else None
 
     sink = None if args.no_supabase else SupabaseSink.from_env()
@@ -296,21 +333,22 @@ def cmd_serve(args: argparse.Namespace) -> None:
             sink.admit(sim)
         except Exception as e:
             sys.exit(f"Supabase: setup failed: {getattr(e, 'message', None) or e}\n"
-                     "Have the tables been created? Apply supabase/migrations/ (see CLAUDE.md -> Deployment), "
+                     "Have the tables been created? Apply server/supabase/migrations/ (see CLAUDE.md -> Deployment), "
                      "or run with --no-supabase.")
         print(f"Supabase: admitted {len(sim.patients)} patients, writing vitals every tick", flush=True)
     else:
         print("Supabase: off (set SUPABASE_URL + SUPABASE_SECRET_KEY to enable)", flush=True)
 
     server = SimServer((args.host, args.port), sim, args.interval, args.speed,
-                       sink=sink, control_token=os.environ.get("SIM_CONTROL_TOKEN", ""))
+                       sink=sink, control_token=args.control_token)
     server.start_ticking()
     print(f"Vitals simulator on http://{args.host}:{server.server_address[1]}  "
           f"({len(sim.patients)} patients, every {args.interval}s, speed x{args.speed:g})  Ctrl-C to stop", flush=True)
     if truth:
         beds = {name: sim.admission(pid).bed_label for name, pid in truth.items()}
-        print(f"Demo script: sepsis from +1 h in bed {beds['sepsis']}, loose SpO2 probe at +2.5 h in bed "
-              f"{beds['falseAlarm']} (ground truth - keep off the nurse UI)", flush=True)
+        print(f"Demo script: sepsis from +{DEMO_SEPSIS_AT_MIN / 60:g} h in bed {beds['sepsis']}, loose SpO2 probe "
+              f"at +{DEMO_FALSE_ALARM_AT_MIN / 60:g} h in bed {beds['falseAlarm']} "
+              "(ground truth - keep off the nurse UI)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -321,25 +359,9 @@ def cmd_serve(args: argparse.Namespace) -> None:
 
 # ------------------------------------------------------------------------------------------------
 
-def load_dotenv(path: Path) -> None:
-    """Minimal .env reader (stdlib only): KEY=VALUE lines, # comments, optional quotes/`export`.
-    Variables already set in the real environment win over the file."""
-    if not path.is_file():
-        return
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        if key.startswith("export "):
-            key = key[len("export "):].strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        elif " #" in value:  # inline comment on an unquoted value
-            value = value.split(" #", 1)[0].rstrip()
-        os.environ.setdefault(key, value)
+# Defaults for --interval / --speed / --event-rate; flags given on the command line always win.
+_FREE_RUNNING = {"interval": 2.0, "speed": 1.0, "event_rate": 0.15}
+_DEMO = {"interval": DEMO_INTERVAL_SEC, "speed": DEMO_SPEED, "event_rate": 0.0}  # CLAUDE.md demo timing
 
 
 def main(argv=None) -> None:
@@ -348,28 +370,34 @@ def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description="Synthea-based bedside vitals simulator")
     parser.add_argument("--clean-dir", default=str(DEFAULT_CLEAN_DIR), help="scrubbed patients (server/Synthea_Gen/transform.py)")
     parser.add_argument("--seed", type=int, default=int(env("SIM_SEED", 1984)))
+    parser.add_argument("--patient-ids", default=env("SIM_PATIENT_IDS", ""),
+                        help="comma-separated ward patient ids, in bed order (default: DEMO_WARD)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     demo = sub.add_parser("demo", help="fast-forward the scripted demo and print a ward table")
-    demo.add_argument("--patients", type=int, default=5)
     demo.add_argument("--hours", type=int, default=8)
     demo.set_defaults(func=cmd_demo)
 
     for name, func, help_ in (("stream", cmd_stream, "JSON lines to stdout"), ("serve", cmd_serve, "HTTP/SSE server")):
         p = sub.add_parser(name, help=help_)
-        p.add_argument("--interval", type=float, default=2, help="real seconds between readings")
-        p.add_argument("--speed", type=float, default=1, help="sim seconds per real second")
-        p.add_argument("--event-rate", type=float, default=0.15, help="random events per patient per sim-hour")
-        p.set_defaults(func=func)
+        p.add_argument("--interval", type=float, help="real seconds between readings (default 2)")
+        p.add_argument("--speed", type=float, help="sim seconds per real second (default 1)")
+        p.add_argument("--event-rate", type=float, help="random events per patient per sim-hour (default 0.15)")
+        p.set_defaults(func=func, demo=False)
         if name == "serve":
             p.add_argument("--demo", action="store_true",
-                           help="scripted demo: 2 s ticks = 15 sim-min, random events off (overrides the above)")
+                           help=f"scripted demo: {DEMO_INTERVAL_SEC:g} s ticks = {DEMO_TICK_MIN} sim-min, random events off")
             p.add_argument("--reset", action="store_true", help="delete Supabase vitals + alerts before starting")
             p.add_argument("--no-supabase", action="store_true", help="don't write to Supabase even if configured")
             p.add_argument("--host", default=env("SIM_HOST", "127.0.0.1"))
             p.add_argument("--port", type=int, default=int(env("SIM_PORT", 8765)))
+            p.add_argument("--control-token", default=env("SIM_CONTROL_TOKEN", ""),
+                           help="require `Authorization: Bearer <token>` on POSTs")
 
     args = parser.parse_args(argv)
+    for key, value in (_DEMO if args.__dict__.get("demo") else _FREE_RUNNING).items():
+        if args.__dict__.get(key, value) is None:
+            setattr(args, key, value)
     args.func(args)
 
 

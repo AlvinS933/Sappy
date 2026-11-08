@@ -12,12 +12,12 @@ release
 
 # Local AI model files (downloaded by `pnpm ai:setup`)
 .models
-
 # Synthea: jar + raw output (raw has names/addresses - never commit). server/data/clean/ IS committed.
-tools/
+server/tools/
+server/data/raw/
+# Older layout's generated files (no longer produced; ignored so leftovers never get committed)
 .cache
-data/raw/
-data/synthea
+server/data/synthea/
 __pycache__
 
 # Local settings and Python virtualenv (never commit) - .env_sample is the shared template

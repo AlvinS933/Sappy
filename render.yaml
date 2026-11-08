@@ -29,7 +29,7 @@ services:
       - key: SIM_CONTROL_TOKEN
         generateValue: true
 
-  # NEWS2 alert worker: polls new `vitals` rows from Supabase every 2 s, writes `alerts`.
+  # NEWS2 alert worker: polls `vitals` every 1 s (latest reading per patient), writes `alerts`.
   - type: worker
     name: news2-alert-worker
     runtime: python

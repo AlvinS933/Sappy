@@ -39,11 +39,12 @@ import re
 import sys
 from datetime import date
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
-ROOT = Path(__file__).resolve().parents[2]  # repo root
-DEFAULT_RAW = ROOT / "server" / "data" / "raw" / "fhir"
-DEFAULT_OUT = ROOT / "server" / "data" / "clean"
+SERVER_DIR = Path(__file__).resolve().parent.parent  # server/
+REPO_ROOT = SERVER_DIR.parent
+DEFAULT_RAW = SERVER_DIR / "data" / "raw" / "fhir"
+DEFAULT_OUT = SERVER_DIR / "data" / "clean"
 
 KEEP_OBSERVATION_CATEGORIES = {"vital-signs", "laboratory"}
 _NON_CLINICAL_TAG = re.compile(r"\((finding|situation|person)\)\s*$")
@@ -93,79 +94,83 @@ def transform_bundle(bundle: dict, today: date) -> Optional[dict]:
     if patient.get("deceasedDateTime") or patient.get("deceasedBoolean"):
         return None
     patient_refs = {f"Patient/{patient['id']}"} | {u for u, r in by_full_url.items() if r is patient}
+    ours = [r for r in resources if (r.get("subject") or {}).get("reference") in patient_refs]
 
-    def is_ours(r: dict) -> bool:
-        return (r.get("subject") or {}).get("reference") in patient_refs
+    clean = {
+        "id": patient["id"],
+        "ageBand": age_band(patient["birthDate"], today),
+        "gender": patient.get("gender", "unknown"),
+        "conditions": sorted(_active_conditions(ours), key=_by_display),
+        "medications": sorted(_active_medications(ours, by_full_url), key=_by_display),
+        "observations": _latest_observations(ours),
+    }
+    assert_scrubbed(clean, patient)
+    return clean
 
-    # Active conditions, minus social determinants.
-    conditions, seen = [], set()
-    for r in resources:
-        if r["resourceType"] != "Condition" or not is_ours(r):
-            continue
-        status = (_coding(r.get("clinicalStatus")) or {}).get("code")
-        c = _coding(r.get("code"), "snomed")
-        if status != "active" or not c or c["code"] in seen:
-            continue
-        display = c["display"] or ""
-        if _NON_CLINICAL_TAG.search(display) and not _CLINICAL_FINDINGS.search(display):
-            continue
-        seen.add(c["code"])
-        conditions.append(c)
 
-    # Active medication requests (inline concept, or a reference to a Medication resource).
-    medications, seen = [], set()
-    for r in resources:
-        if r["resourceType"] != "MedicationRequest" or not is_ours(r) or r.get("status") != "active":
-            continue
-        concept = r.get("medicationCodeableConcept")
-        if concept is None and "medicationReference" in r:
-            concept = (by_full_url.get(r["medicationReference"].get("reference", "")) or {}).get("code")
-        m = _coding(concept, "rxnorm")
-        if m and m["code"] not in seen:
-            seen.add(m["code"])
-            medications.append(m)
+def _by_display(coding: dict) -> str:
+    return coding["display"] or ""
 
-    # Latest numeric value per LOINC code (BP panel components flattened into their own codes).
-    latest: Dict[str, dict] = {}
-    for r in resources:
-        if r["resourceType"] != "Observation" or not is_ours(r):
+
+def _unique_by_code(codings: Iterable[Optional[dict]]) -> List[dict]:
+    """Drop missing codings and keep the first of each code, in order."""
+    out: Dict[str, dict] = {}
+    for c in codings:
+        if c and c["code"] not in out:
+            out[c["code"]] = c
+    return list(out.values())
+
+
+def _active_conditions(ours: List[dict]) -> List[dict]:
+    """Active conditions, minus social determinants (employment, housing, criminal record, ...)."""
+    found = []
+    for r in ours:
+        if r["resourceType"] == "Condition" and (_coding(r.get("clinicalStatus")) or {}).get("code") == "active":
+            c = _coding(r.get("code"), "snomed")
+            display = (c or {}).get("display") or ""
+            if c and (not _NON_CLINICAL_TAG.search(display) or _CLINICAL_FINDINGS.search(display)):
+                found.append(c)
+    return _unique_by_code(found)
+
+
+def _active_medications(ours: List[dict], by_full_url: Dict[str, dict]) -> List[dict]:
+    """Active medication requests (inline concept, or a reference to a Medication resource)."""
+    found = []
+    for r in ours:
+        if r["resourceType"] == "MedicationRequest" and r.get("status") == "active":
+            concept = r.get("medicationCodeableConcept")
+            if concept is None and "medicationReference" in r:
+                concept = (by_full_url.get(r["medicationReference"].get("reference", "")) or {}).get("code")
+            found.append(_coding(concept, "rxnorm"))
+    return _unique_by_code(found)
+
+
+def _latest_observations(ours: List[dict]) -> List[dict]:
+    """Latest numeric value per LOINC code (BP panel components flattened into their own codes)."""
+    latest: Dict[str, Tuple[str, dict]] = {}  # code -> (effective time, clean observation)
+    for r in ours:
+        if r["resourceType"] != "Observation":
             continue
         categories = {(_coding(c) or {}).get("code") for c in r.get("category") or []}
         category = next(iter(categories & KEEP_OBSERVATION_CATEGORIES), None)
         when = r.get("effectiveDateTime") or (r.get("effectivePeriod") or {}).get("start")
         if not category or not when:
             continue
-        parts = [r] + list(r.get("component") or [])
-        for part in parts:
+        for part in [r, *(r.get("component") or [])]:
             q = part.get("valueQuantity")
             code = _coding(part.get("code"), "loinc")
             if not q or "value" not in q or not code:
                 continue
-            prev = latest.get(code["code"])
-            if prev is None or when > prev["_when"]:
-                latest[code["code"]] = {
+            if code["code"] not in latest or when > latest[code["code"]][0]:
+                latest[code["code"]] = (when, {
                     "code": code["code"],
                     "display": code["display"],
                     "category": category,
                     "value": q["value"],
                     "unit": q.get("unit") or q.get("code"),
                     "effectiveDate": when[:10],
-                    "_when": when,
-                }
-    observations = sorted(
-        ({k: v for k, v in o.items() if k != "_when"} for o in latest.values()), key=lambda o: o["code"]
-    )
-
-    clean = {
-        "id": patient["id"],
-        "ageBand": age_band(patient["birthDate"], today),
-        "gender": patient.get("gender", "unknown"),
-        "conditions": sorted(conditions, key=lambda c: c["display"] or ""),
-        "medications": sorted(medications, key=lambda m: m["display"] or ""),
-        "observations": observations,
-    }
-    assert_scrubbed(clean, patient)
-    return clean
+                })
+    return [obs for _, (_, obs) in sorted(latest.items())]
 
 
 # ------------------------------------------------------------------------------------------------
@@ -217,12 +222,17 @@ def assert_scrubbed(clean: dict, raw_patient: dict) -> None:
 # CLI
 # ------------------------------------------------------------------------------------------------
 
-def run(raw_dir: Path, out_dir: Path, today: Optional[date] = None) -> List[dict]:
-    today = today or date.today()
-    files = sorted(
+def bundle_files(raw_dir: Path) -> List[Path]:
+    """Patient bundles in raw_dir (skips Synthea's hospital/practitioner organisation bundles)."""
+    return sorted(
         p for p in raw_dir.glob("*.json")
         if not p.name.startswith(("hospitalInformation", "practitionerInformation"))
     )
+
+
+def run(raw_dir: Path, out_dir: Path, today: Optional[date] = None) -> List[dict]:
+    today = today or date.today()
+    files = bundle_files(raw_dir)
     if not files:
         raise FileNotFoundError(f"no FHIR bundles in {raw_dir} - run server/Synthea_Gen/synthea.py first")
 
@@ -253,7 +263,7 @@ def main(argv=None) -> None:
     except (FileNotFoundError, ValueError) as e:
         sys.exit(f"error: {e}")
     sizes = [len(json.dumps(c)) for c in cleaned]
-    print(f"==> Wrote {len(cleaned)} clean patients to {args.out.relative_to(ROOT) if args.out.is_relative_to(ROOT) else args.out}/"
+    print(f"==> Wrote {len(cleaned)} clean patients to {args.out.relative_to(REPO_ROOT) if args.out.is_relative_to(REPO_ROOT) else args.out}/"
           f"  (avg {sum(sizes) // max(1, len(sizes)) / 1000:.1f} KB each)")
 
 
