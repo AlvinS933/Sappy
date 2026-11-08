@@ -27,7 +27,13 @@ class FakeQuery:
     """Records a supabase-py style call chain: table(..).op(..).filters(..).execute()."""
 
     def __init__(self, log: list, table: str):
-        self.call = {"table": table, "op": None, "data": None, "filters": [], "kwargs": {}}
+        self.call: dict[str, object] = {
+            "table": table,
+            "op": None,
+            "data": None,
+            "filters": [],
+            "kwargs": {},
+        }
         self._negate = False
         log.append(self.call)
 
