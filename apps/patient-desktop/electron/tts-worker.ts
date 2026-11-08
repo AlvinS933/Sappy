@@ -1,13 +1,13 @@
-// Runs Kokoro text-to-speech on a background thread so the Electron main
+// Runs Kokoro text-to-speech in a separate process so the Electron main
 // process (and therefore the window) never freezes while audio is generated.
-import { parentPort, workerData } from 'node:worker_threads'
 import { env } from '@huggingface/transformers'
 import { KokoroTTS, TextSplitterStream } from 'kokoro-js'
+import { onParentMessage, postToParent, waitForInit } from './child-port'
 
 type TtsConfig = { model: string; dtype: 'fp32' | 'fp16' | 'q8' | 'q4' | 'q4f16'; voice: string; speed: number }
-type WorkerData = { modelsDir: string; config: TtsConfig }
 
 export type WorkerRequest =
+  | { type: 'init'; modelsDir: string; config: TtsConfig }
   | { type: 'speak'; id: number; text: string }
   | { type: 'cancel'; id: number }
 
@@ -17,14 +17,7 @@ export type WorkerResponse =
   | { type: 'done'; id: number }
   | { type: 'error'; id?: number; message: string }
 
-const { modelsDir, config } = workerData as WorkerData
-const port = parentPort!
-const post = (msg: WorkerResponse, transfer: ArrayBuffer[] = []) => port.postMessage(msg, transfer)
-
-// Load model files only from disk — never download at runtime.
-env.cacheDir = modelsDir
-env.localModelPath = modelsDir
-env.allowRemoteModels = false
+const post = (msg: WorkerResponse, transfer: ArrayBuffer[] = []) => postToParent(msg, transfer)
 
 const cancelled = new Set<number>()
 let queue = Promise.resolve()
@@ -43,7 +36,14 @@ function toSpeakable(text: string): string {
     .trim()
 }
 
-const ttsPromise = KokoroTTS.from_pretrained(config.model, { dtype: config.dtype, device: 'cpu' })
+const init = waitForInit<Extract<WorkerRequest, { type: 'init' }>>()
+const ttsPromise = init.then(({ modelsDir, config }) => {
+  // Load model files only from disk — never download at runtime.
+  env.cacheDir = modelsDir
+  env.localModelPath = modelsDir
+  env.allowRemoteModels = false
+  return KokoroTTS.from_pretrained(config.model, { dtype: config.dtype, device: 'cpu' })
+})
 ttsPromise.then(
   () => post({ type: 'ready' }),
   (err) => post({ type: 'error', message: `Failed to load TTS model: ${err?.message ?? err}` }),
@@ -52,6 +52,7 @@ ttsPromise.then(
 async function speak(id: number, text: string) {
   try {
     const tts = await ttsPromise
+    const { config } = await init
     const speakable = toSpeakable(text)
     if (!speakable || cancelled.has(id)) return
     // stream() splits into sentences and yields audio for each one as soon as it's ready.
@@ -73,7 +74,8 @@ async function speak(id: number, text: string) {
   }
 }
 
-port.on('message', (msg: WorkerRequest) => {
+onParentMessage((raw) => {
+  const msg = raw as WorkerRequest
   if (msg.type === 'cancel') {
     cancelled.add(msg.id)
   } else if (msg.type === 'speak') {

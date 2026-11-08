@@ -6,5 +6,14 @@
     "dtype": "fp32",
     "voice": "af_heart",
     "speed": 1
+  },
+  "stt": {
+    "model": "onnx-community/whisper-base.en",
+    "dtype": "fp32"
+  },
+  "wakeWord": {
+    "model": "hey_jarvis_v0.1.onnx",
+    "phrase": "Hey Jarvis",
+    "threshold": 0.5
   }
 }
