@@ -32,9 +32,10 @@ server/                  all backend Python (core: standard library only, Python
   Synthea_Gen/transform.py raw FHIR -> scrubbed server/data/clean/ (committed)
   sim/                     vitals simulator, HTTP/SSE server, Supabase writer (supabase_sink.py)
   news2/scoring.py         NEWS2 scoring + alert persistence rule
+  news2/alert_worker.py    Render worker: polls Supabase `vitals`, scores, writes `alerts`
   pylib/                   small shared helpers (.env loader, LOINC map)
   supabase/migrations/     Postgres schema, RLS, Realtime (Supabase CLI project lives in server/)
-render.yaml              Render blueprint (runs server/sim/cli.py serve --demo)
+render.yaml              Render blueprint (simulator web service + NEWS2 alert worker)
 requirements.txt         Python deps for the Supabase writer (venv, 3.12+)
 ```
 
@@ -64,7 +65,7 @@ types in `packages/shared` mirror the SQL by hand; if they drift, use `supabase 
 Synthea -> transform -> server/data/clean/ (committed)
                               |
           Render: server/sim --+--> Supabase: patients, encounters, vitals --Realtime--> nurse-web (Vercel)
-          NEWS2 (server/news2) <-- vitals, --> alerts ------------------------Realtime--> patient-desktop
+  Render: news2/alert_worker <-- vitals (poll 1 s), --> alerts ------------Realtime--> patient-desktop
 ```
 
 ## Prerequisites
@@ -95,6 +96,8 @@ pnpm sim:demo        # 3. simulate: scripted demo, fast-forwarded, printed as a 
 pnpm sim:serve       #    same demo live on http://127.0.0.1:8765 (2 s = 15 min); also writes to
                      #    Supabase when SUPABASE_URL + SUPABASE_SECRET_KEY are set (needs the venv)
 pnpm test:sim        # simulator + transform + Supabase-writer tests (no network)
+pnpm alerts          # 4. score: NEWS2 alert worker against Supabase (needs the venv + keys)
+pnpm test:alerts     #    alert worker tests (fake Supabase client, no network)
 ```
 
 ## Deployment
@@ -102,8 +105,8 @@ pnpm test:sim        # simulator + transform + Supabase-writer tests (no network
 1. **Supabase**: apply `server/supabase/migrations/` (SQL editor, or from `server/`: `supabase link` +
    `supabase db push`).
    Create staff users under Authentication; RLS lets only signed-in users read.
-2. **Render**: New -> Blueprint -> this repo (`render.yaml`). Set `SUPABASE_URL` and
-   `SUPABASE_SECRET_KEY`. `server/data/clean/` must be committed. Free instances sleep and stop the
+2. **Render**: New -> Blueprint -> this repo (`render.yaml`): simulator + alert worker. Set
+   `SUPABASE_URL` and `SUPABASE_SECRET_KEY` on both. `server/data/clean/` must be committed. Free instances sleep and stop the
    simulator, so demo on a paid instance. Demo controls need `Authorization: Bearer $SIM_CONTROL_TOKEN`.
 3. **Vercel**: import the repo, Root Directory `apps/nurse-web` (Vite is auto-detected). Set
    `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. If install fails on the pinned pnpm
@@ -122,8 +125,8 @@ pnpm test:sim        # simulator + transform + Supabase-writer tests (no network
   pseudonymized clinical data.
 - RLS is on for every Supabase table. The secret key (bypasses RLS) lives only in Render and the
   local `.env`, never in a frontend or a `VITE_` variable. Browsers use the publishable key + sign-in.
-- Scenario ground truth (who is "septic") is never written to Supabase; the agent and the nurse UI
-  only see the vitals stream.
+- Scenario ground truth (who is "septic") is never written to Supabase; the alert worker and the
+  nurse UI only see the vitals stream.
 
 ## Data flow (separate, independent steps)
 
@@ -138,7 +141,8 @@ Keep the steps independent so a simulator bug never requires regenerating data.
 3. **simulate**: `server/sim/vitals_sim.py` loads the clean patients, admits the 5-patient ward
    (in-progress Encounter + bed), derives a baseline per patient, and emits one reading per patient
    per tick. Scenarios push vitals away from baseline. Deterministic given a seed.
-4. **score**: `server/news2/scoring.py` scores each reading and decides the alert tier.
+4. **score**: `server/news2/alert_worker.py` (Render worker) polls `vitals` every 1 s, scores each
+   new reading with `scoring.py`'s `News2Monitor`, and writes `alerts` (see Alerting).
 
 Reading shape (one per patient per tick):
 
@@ -194,6 +198,12 @@ Implemented in `server/news2/scoring.py`. NEWS2 tests are owned by a different t
   guarantee the simulator always sends them.
 - **Explanation:** every result carries `reasons` (e.g. `"Respiratory rate 23/min (+2)"`) and
   the NEWS2 recommended `response`.
+- **Alert worker (`alerts` rows):** `vitals` only holds the latest reading, overwritten every 2 s,
+  so the worker polls every 1 s and scores rows whose `recorded_at` changed. A row is written only
+  when a patient's confirmed tier rises above the last tier alerted; holding a tier doesn't repeat
+  it. The bar only drops after `RESET_AFTER` (8) readings below it, so a vital wobbling across a
+  band edge doesn't re-alert. All tiers are written, including `watch` (the UI shows it quietly).
+  `reason` is the NEWS2 reasons joined. Suppressed readings are logged, not written.
 - Later: use Conditions/Meds for context (e.g. beta blockers blunt HR); write alerts back as
   FHIR `Flag` or `Communication` resources.
 
@@ -214,13 +224,20 @@ written to Supabase; on start the simulator removes any other patients from the 
 
 `vitals` in Supabase holds **one row per patient** with their latest reading: every tick the
 simulator upserts on `patient_id` (update the row, or insert it the first time). There's no history
-in the table, so the NEWS2 agent and the UI must keep their own history from Realtime UPDATE events
+in the table, so the alert worker and the UI must keep their own history from Realtime UPDATE events
 for trend detection and charts.
+
+## Decided
+
+- NEWS2 runs as a **separate Render worker** (`server/news2/alert_worker.py`) that **polls**
+  `vitals` every 1 s and writes `alerts`.
+- Server code writes to Supabase via the `supabase` package + `SUPABASE_SECRET_KEY`; apps get live
+  data from Supabase Realtime.
+- Alerts are written for every tier, including `watch`.
+- "Agent" is reserved for actual AI agents; plain loops like the alert worker are "workers".
 
 ## Open decisions (ask before building)
 
-- Where NEWS2 runs: inside the simulator process on Render, or as a separate Render worker that
-  reads `vitals` from Supabase (Realtime subscription vs. polling) and writes `alerts`.
 - Whether to also keep vitals history in Supabase (today `vitals` holds only the latest reading per
   patient, updated in place), and/or store vitals as FHIR `Observation` JSON.
 - Stretch: replay one patient from the MIMIC-IV demo on FHIR (PhysioNet) as a "real data" showcase.

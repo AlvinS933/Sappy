@@ -29,18 +29,17 @@ services:
       - key: SIM_CONTROL_TOKEN
         generateValue: true
 
-  # NEWS2 + ML agent (teammate): reads new `vitals` rows from Supabase, writes `alerts`.
-  # Uncomment and set startCommand once the agent exists.
-  # - type: worker
-  #   name: news2-agent
-  #   runtime: python
-  #   plan: starter
-  #   buildCommand: pip install -r requirements.txt
-  #   startCommand: python agent/main.py
-  #   envVars:
-  #     - key: PYTHON_VERSION
-  #       value: 3.12.11
-  #     - key: SUPABASE_URL
-  #       sync: false
-  #     - key: SUPABASE_SECRET_KEY
-  #       sync: false
+  # NEWS2 alert worker: polls `vitals` every 1 s (latest reading per patient), writes `alerts`.
+  - type: worker
+    name: news2-alert-worker
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server/news2/alert_worker.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
