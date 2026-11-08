@@ -12,15 +12,21 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    # --demo: 1 tick every 2 s = 15 hospital minutes, scripted sepsis + false alarm.
+    # --demo: scripted sepsis + false alarm, 1 reading every 2 s.
+    # SIM_SPEED = hospital seconds per real second (change it in the Render dashboard, then redeploy):
+    #   450 = demo default (2 s = 15 min: sepsis at 8 s, fully developed ~40 s)
+    #    60 = 2 s = 2 min (sepsis at 1 min, fully developed ~5 min, false alarm at 2.5 min)
+    #     1 = real time
     # Add --reset to clear Supabase vitals/alerts on every start (including restarts/deploys).
-    startCommand: python server/sim/cli.py serve --demo --host 0.0.0.0 --port $PORT
+    startCommand: python server/sim/cli.py serve --demo --speed ${SIM_SPEED:-60} --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.11
       - key: SIM_SEED
         value: "1984"
+      - key: SIM_SPEED
+        value: "60"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SECRET_KEY

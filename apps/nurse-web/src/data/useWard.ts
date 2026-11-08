@@ -92,6 +92,9 @@ export function useWard(): WardState {
 
   useEffect(() => {
     let cancelled = false
+    // "Updated" time = when data last actually changed, not when we last re-checked
+    // (the 30 s safety refresh mustn't make a stopped simulator look live).
+    let fingerprint = ''
     const load = () =>
       loadWard().then(
         ({ ward: w, warning: notice }) => {
@@ -99,7 +102,11 @@ export function useWard(): WardState {
           setWard(w)
           setWarning(notice)
           setError(null)
-          setLastUpdate(new Date())
+          const next = JSON.stringify([w.beds.map((b) => b.vitals?.recordedAt), w.alerts.map((a) => `${a.key}:${a.status}`)])
+          if (next !== fingerprint) {
+            fingerprint = next
+            setLastUpdate(new Date())
+          }
         },
         (err) => !cancelled && setError(err?.message ?? String(err)),
       )
