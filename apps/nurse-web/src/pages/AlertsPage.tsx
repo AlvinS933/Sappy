@@ -129,8 +129,8 @@ function FeaturedAlert({ alert, ward, now, setStatus, openPatient }: { alert: Wa
         <strong>{clock(alert.created_at, now)}</strong>
       </div>
       <div className="featured-actions">
-        <button className="btn btn-primary" onClick={complete} disabled={busy}>
-          {busy ? 'Saving…' : 'Mark complete'}
+        <button className="btn-complete btn-complete-lg" onClick={complete} disabled={busy}>
+          {busy ? 'Saving…' : 'Complete'}
         </button>
         <button className="btn btn-secondary" onClick={() => openPatient(alert.patient_id)}>
           Patient

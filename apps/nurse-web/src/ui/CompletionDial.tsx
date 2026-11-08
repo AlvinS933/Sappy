@@ -1,4 +1,4 @@
-// Half-circle dial: completed (green) vs incomplete (brown) alerts. Always drawn, even at zero.
+// Half-circle dial: completed (orange) vs incomplete (brown) alerts. Always drawn, even at zero.
 import { alertStats, type WardAlert } from '../data/model'
 import { Card } from './common'
 
@@ -26,7 +26,7 @@ export function CompletionDial({ alerts, title = 'Last 24 hours' }: { alerts: Wa
         </div>
       </div>
       <div className="legend legend-center">
-        <span><i className="dot dot-ok" /><b>{s.completed}</b> Completed</span>
+        <span><i className="dot dot-done" /><b>{s.completed}</b> Completed</span>
         <span><i className="dot dot-accent" /><b>{s.incomplete}</b> Incomplete</span>
       </div>
     </Card>

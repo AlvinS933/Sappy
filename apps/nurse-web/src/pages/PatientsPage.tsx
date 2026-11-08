@@ -16,6 +16,7 @@ import {
   type Bed,
   type Ward,
 } from '../data/model'
+import { demoIdentity, formatDob } from '../data/demoIdentity'
 import { Card, Chip, Segmented, StatusChip } from '../ui/common'
 import { useNow } from '../ui/useNow'
 
@@ -30,7 +31,7 @@ export function PatientsPage({ ward, selectedId, select }: { ward: Ward; selecte
   })
   const q = query.trim().toLowerCase()
   const list = q
-    ? ranked.filter((b) => [b.label, patientSummary(b.patient), b.patient.id, ...(b.patient.conditions ?? [])].some((s) => s.toLowerCase().includes(q)))
+    ? ranked.filter((b) => [b.label, patientSummary(b.patient), b.patient.id, demoIdentity(b.patient.id)?.name ?? '', ...(b.patient.conditions ?? [])].some((s) => s.toLowerCase().includes(q)))
     : ranked
   const selected = ward.beds.find((b) => b.patient.id === selectedId) ?? ranked[0]
 
@@ -41,7 +42,7 @@ export function PatientsPage({ ward, selectedId, select }: { ward: Ward; selecte
           <h1>Patients</h1>
           <p className="subtitle">{ward.beds.length} occupied beds</p>
         </div>
-        <input className="search" type="search" placeholder="Search bed, age, condition or id" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input className="search" type="search" placeholder="Search name, bed, age, condition or id" value={query} onChange={(e) => setQuery(e.target.value)} />
       </header>
 
       {ward.beds.length === 0 ? (
@@ -52,12 +53,13 @@ export function PatientsPage({ ward, selectedId, select }: { ward: Ward; selecte
             <ul className="patient-list">
               {list.map((bed) => {
                 const tier = incompleteTier(ward, bed)
+                const ident = demoIdentity(bed.patient.id)
                 return (
                   <li key={bed.encounterId}>
                     <button className={`patient-row ${bed === selected ? 'selected' : ''}`} onClick={() => select(bed.patient.id)}>
                       <span className="bed-square">{bed.label}</span>
                       <span className="request-main">
-                        <strong>{patientSummary(bed.patient)}</strong>
+                        <strong>{ident ? `${ident.name} · ${patientSummary(bed.patient)}` : patientSummary(bed.patient)}</strong>
                         <small>{shortId(bed.patient)} · {bed.patient.conditions?.[0] ?? 'No active conditions'}</small>
                       </span>
                       {tier && <Chip tone={TIER[tier].className}>{TIER[tier].label}</Chip>}
@@ -84,6 +86,7 @@ function PatientDetail({ ward, bed }: { ward: Ward; bed: Bed }) {
   const top = open[0]
   const history = [...alerts].reverse().filter((a) => range === 'all' || isIncomplete(a))
   const p = bed.patient
+  const ident = demoIdentity(p.id)
 
   return (
     <>
@@ -93,9 +96,20 @@ function PatientDetail({ ward, bed }: { ward: Ward; bed: Bed }) {
           <span className="featured-bed-caption">BED</span>
         </div>
         <div className="patient-header-body">
-          <h2>Patient {shortId(p)}</h2>
-          <p>{p.ageBand} · {SEX_LABEL[p.gender ?? 'unknown']}</p>
-          <p className="muted">Pseudonymous id {p.id}</p>
+          <h2>{ident ? ident.name : `Patient ${shortId(p)}`}</h2>
+          {ident ? (
+            <>
+              <p>
+                DOB {formatDob(ident.dob)} · {p.ageBand} · {SEX_LABEL[p.gender ?? 'unknown']}
+              </p>
+              <p>
+                {ident.mrn} · Allergies: {ident.allergies}
+              </p>
+            </>
+          ) : (
+            <p>{p.ageBand} · {SEX_LABEL[p.gender ?? 'unknown']}</p>
+          )}
+          <p className="muted">Patient id {p.id}</p>
         </div>
         {top && (
           <Chip tone={TIER[top.tier].className}>

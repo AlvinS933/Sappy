@@ -49,7 +49,7 @@
   background: var(--sidebar-2);
 }
 .nav-item.active {
-  background: #6e4c33;
+  background: #6f4c32;
 }
 .nav-item span:first-of-type {
   flex: 1;
@@ -59,7 +59,7 @@
   min-width: 22px;
   padding: 1px 7px;
   border-radius: 999px;
-  background: #e2a77c;
+  background: #e09e7b;
   color: var(--sidebar);
   font-size: 0.75rem;
   font-weight: 700;
@@ -109,7 +109,7 @@
   padding: 10px 8px 0;
 }
 .connection .dot {
-  background: #8fbf86;
+  background: #a8c7a0;
 }
 .connection-error .dot {
   background: var(--emergency);
@@ -220,12 +220,21 @@
 .span-rows {
   grid-row: span 3;
 }
+/* Right-hand widget column: stacks evenly and stays in view while the long list scrolls. */
+.side-stack {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
 
 .card {
   padding: 22px 24px;
   border-radius: var(--radius);
   background: var(--card);
-  box-shadow: 0 1px 2px rgba(60, 40, 20, 0.04);
+  box-shadow: 0 1px 2px rgba(89, 59, 38, 0.04);
   min-width: 0;
 }
 .card-header,
@@ -352,10 +361,10 @@
   letter-spacing: 0.06em;
 }
 .featured-check-soon .featured-kicker {
-  color: #a86b16;
+  color: #8f5208;
 }
 .featured-watch .featured-kicker {
-  color: #4f7883;
+  color: #2c6470;
 }
 .featured-body h2 {
   font-size: 1.35rem;
@@ -363,7 +372,7 @@
   margin: 2px 0 2px;
 }
 .featured-detail {
-  color: #6b5e55;
+  color: #5e4d42;
   font-size: 0.85rem;
   margin-bottom: 8px;
 }
@@ -382,10 +391,10 @@
   font-variant-numeric: tabular-nums;
 }
 .featured-check-soon .featured-wait strong {
-  color: #a86b16;
+  color: #8f5208;
 }
 .featured-watch .featured-wait strong {
-  color: #4f7883;
+  color: #2c6470;
 }
 .featured-actions {
   display: flex;
@@ -438,11 +447,11 @@
 }
 .chip-check-soon {
   background: var(--urgent-soft);
-  color: #a86b16;
+  color: #8f5208;
 }
 .chip-watch {
   background: var(--routine-soft);
-  color: #4f7883;
+  color: #2c6470;
 }
 .chip-ok {
   background: var(--ok-soft);
@@ -450,7 +459,7 @@
 }
 .chip-muted {
   background: var(--accent-soft);
-  color: #6b5e55;
+  color: #5e4d42;
   font-weight: 500;
 }
 
@@ -497,7 +506,7 @@
 .log-row:hover,
 .patient-row:hover {
   border-color: var(--line-strong);
-  background: #fdfbf8;
+  background: #fffbf6;
 }
 .request-main {
   flex: 1;
@@ -581,7 +590,7 @@
 .log-time {
   width: 46px;
   flex: none;
-  color: #6b5e55;
+  color: #5e4d42;
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
 }
@@ -625,7 +634,7 @@
   font-size: 1.4rem;
 }
 .patient-header-body p {
-  color: #6b5e55;
+  color: #5e4d42;
 }
 .patient-header-body .muted {
   font-size: 0.75rem;
@@ -681,7 +690,7 @@
   line-height: 1.1;
 }
 .stat-tile span {
-  color: #6b5e55;
+  color: #5e4d42;
   font-size: 0.8rem;
 }
 .stat-ok {
@@ -771,7 +780,7 @@
   stroke: var(--accent);
 }
 .gauge-completed {
-  stroke: var(--ok);
+  stroke: var(--done);
 }
 .gauge-label {
   position: absolute;
@@ -834,6 +843,9 @@
 .dot-ok {
   background: var(--ok);
 }
+.dot-done {
+  background: var(--done);
+}
 .dot-accent {
   background: var(--accent);
 }
@@ -848,7 +860,7 @@
   height: 46px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #f3ece4;
+  background: #f3eae4;
   font-size: 0.85rem;
   cursor: pointer;
 }
@@ -883,7 +895,7 @@
   padding: 32px;
   border-radius: 20px;
   background: var(--card);
-  box-shadow: 0 8px 30px rgba(60, 40, 20, 0.08);
+  box-shadow: 0 8px 30px rgba(89, 59, 38, 0.08);
 }
 .login-card h1 {
   font-size: 1.4rem;
@@ -917,6 +929,9 @@
   .span-rows {
     grid-column: auto;
     grid-row: auto;
+  }
+  .side-stack {
+    position: static;
   }
   .featured {
     grid-template-columns: auto 1fr;
@@ -960,7 +975,7 @@
 .med-list {
   margin: 0;
   padding-left: 18px;
-  color: #4a3f38;
+  color: #4a3a30;
   font-size: 0.85rem;
 }
 .med-list li + li {
@@ -1013,21 +1028,32 @@
 }
 .btn-complete {
   padding: 8px 14px;
-  border: 1px solid var(--ok);
+  border: 1px solid var(--done);
   border-radius: 10px;
-  background: var(--ok-soft);
-  color: var(--ok);
+  background: var(--done-soft);
+  color: var(--done-ink);
   font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
 }
 .btn-complete:hover:not(:disabled) {
-  background: var(--ok);
-  color: #fff;
+  background: var(--done);
+  color: var(--ink);
 }
 .btn-complete:disabled {
   opacity: 0.6;
   cursor: default;
+}
+/* Same button, larger and filled, for the featured alert's main action. */
+.btn-complete-lg {
+  padding: 12px 22px;
+  font-size: inherit;
+  background: var(--done);
+  color: var(--ink);
+}
+.btn-complete-lg:hover:not(:disabled) {
+  background: #d58a63;
+  border-color: #d58a63;
 }
 .request-error {
   flex-basis: 100%;
@@ -1039,7 +1065,7 @@
   color: var(--emergency);
 }
 .source-patient {
-  border-color: #d9c2ad;
+  border-color: #d7c3b9;
   color: var(--accent);
 }
 
@@ -1048,7 +1074,7 @@
   padding: 10px 14px;
   border-radius: 10px;
   background: var(--urgent-soft);
-  color: #8a5a12;
+  color: #8f5208;
   font-size: 0.85rem;
 }
 

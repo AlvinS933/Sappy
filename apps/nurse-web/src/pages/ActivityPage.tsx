@@ -46,7 +46,7 @@ export function ActivityPage({ ward, openPatient }: { ward: Ward; openPatient: (
       </header>
 
       <div className="grid grid-activity">
-        <Card className="span-rows">
+        <Card>
           <div className="card-toolbar">
             <Segmented<Filter>
               value={filter}
@@ -94,10 +94,11 @@ export function ActivityPage({ ward, openPatient }: { ward: Ward; openPatient: (
           ))}
         </Card>
 
-        <CompletionDial alerts={scoped} />
-
-        <ResponseChart alerts={scoped} avg={s.avgResponse} />
-        <AlertsByBed ward={ward} alerts={scoped} openPatient={openPatient} />
+        <div className="side-stack">
+          <CompletionDial alerts={scoped} />
+          <ResponseChart alerts={scoped} avg={s.avgResponse} />
+          <AlertsByBed ward={ward} alerts={scoped} openPatient={openPatient} />
+        </div>
       </div>
     </>
   )
