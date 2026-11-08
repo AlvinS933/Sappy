@@ -20,10 +20,13 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "ai:setup": "node scripts/ai-setup.mjs",
-    "data:synthea": "python3 scripts/synthea.py",
-    "sim:demo": "python3 sim/cli.py demo",
-    "sim:serve": "python3 sim/cli.py serve --speed 30",
-    "test:sim": "python3 -m unittest discover sim -v",
+    "data:synthea": "python3 server/Synthea_Gen/synthea.py",
+    "data:transform": "python3 server/Synthea_Gen/transform.py",
+    "sim:demo": "python3 server/sim/cli.py demo",
+    "sim:serve": "python3 server/sim/cli.py serve --demo",
+    "test:sim": "python3 -m unittest discover server/sim -v && python3 -m unittest discover server/Synthea_Gen -v",
+    "alerts": "python3 server/news2/alert_worker.py",
+    "test:alerts": "python3 -m unittest server/news2/test_alert_worker.py -v",
     "wake:test": "node scripts/wake-test.mjs"
   }
 }

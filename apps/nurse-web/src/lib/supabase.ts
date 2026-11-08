@@ -1,0 +1,83 @@
+// Supabase browser client for the nurse dashboard.
+//
+// Uses the publishable key: data is only readable after sign-in (Row Level Security, see
+// server/supabase/migrations/). Never put the secret key in this app.
+//
+// Env (apps/nurse-web/.env locally, Vercel project settings in production):
+//   VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY
+
+import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
+import {
+  encounterFromRow,
+  patientFromRow,
+  vitalsFromRow,
+  type AlertRow,
+  type Encounter,
+  type EncounterRow,
+  type Patient,
+  type PatientRow,
+  type VitalsReading,
+  type VitalsRow,
+} from '@repo/shared'
+
+const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
+const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined
+
+if (!url || !publishableKey) {
+  throw new Error(
+    'Missing VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY. Copy apps/nurse-web/.env.example to ' +
+      'apps/nurse-web/.env (or set them in Vercel).',
+  )
+}
+
+export const supabase = createClient(url, publishableKey)
+
+/** Patients and their current in-progress encounters (bed = `encounter.location.display`). */
+export async function fetchWard(): Promise<{ patients: Patient[]; encounters: Encounter[] }> {
+  const [patients, encounters] = await Promise.all([
+    supabase.from('patients').select('*'),
+    supabase.from('encounters').select('*').eq('status', 'in-progress'),
+  ])
+  if (patients.error) throw patients.error
+  if (encounters.error) throw encounters.error
+  return {
+    patients: (patients.data as PatientRow[]).map(patientFromRow),
+    encounters: (encounters.data as EncounterRow[]).map(encounterFromRow),
+  }
+}
+
+/** Each patient's latest reading (the `vitals` table holds one row per patient). */
+export async function fetchLatestVitals(): Promise<VitalsReading[]> {
+  const { data, error } = await supabase.from('vitals').select('*')
+  if (error) throw error
+  return (data as VitalsRow[]).map(vitalsFromRow)
+}
+
+/**
+ * Live vitals + alerts. Returns an unsubscribe function (call it on unmount).
+ * The simulator updates each patient's `vitals` row in place every tick, so this listens for
+ * UPDATE (and the first INSERT). Keep any history you want to chart in component state.
+ */
+export function subscribeToWard(handlers: {
+  onVitals?: (reading: VitalsReading) => void
+  onAlert?: (alert: AlertRow) => void
+}): () => void {
+  // INSERT/UPDATE only: a DELETE carries no new row.
+  const channel: RealtimeChannel = supabase
+    .channel('ward')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'vitals' }, (payload) => {
+      if (payload.eventType !== 'DELETE') handlers.onVitals?.(vitalsFromRow(payload.new as VitalsRow))
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, (payload) => {
+      if (payload.eventType !== 'DELETE') handlers.onAlert?.(payload.new as AlertRow)
+    })
+    .subscribe()
+  return () => {
+    void supabase.removeChannel(channel)
+  }
+}
+
+export async function acknowledgeAlert(id: number): Promise<void> {
+  const { error } = await supabase.from('alerts').update({ acknowledged_at: new Date().toISOString() }).eq('id', id)
+  if (error) throw error
+}

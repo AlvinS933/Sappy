@@ -1,0 +1,201 @@
+{
+  "id": "2b486392-abcd-f803-869e-378a1ae69603",
+  "ageBand": "30-39",
+  "gender": "female",
+  "conditions": [],
+  "medications": [],
+  "observations": [
+    {
+      "code": "18262-6",
+      "display": "Cholesterol in LDL [Mass/volume] in Serum or Plasma by Direct assay",
+      "category": "laboratory",
+      "value": 92.18,
+      "unit": "mg/dL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "2085-9",
+      "display": "Cholesterol in HDL [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 49.03,
+      "unit": "mg/dL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "2093-3",
+      "display": "Cholesterol [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 165.46,
+      "unit": "mg/dL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "2571-8",
+      "display": "Triglyceride [Mass/volume] in Serum or Plasma",
+      "category": "laboratory",
+      "value": 121.26,
+      "unit": "mg/dL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "29463-7",
+      "display": "Body Weight",
+      "category": "vital-signs",
+      "value": 80.9,
+      "unit": "kg",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "32207-3",
+      "display": "Platelet distribution width [Entitic volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 206.76,
+      "unit": "fL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "32623-1",
+      "display": "Platelet [Entitic mean volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 10.06,
+      "unit": "fL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "39156-5",
+      "display": "Body mass index (BMI) [Ratio]",
+      "category": "vital-signs",
+      "value": 28.55,
+      "unit": "kg/m2",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "4544-3",
+      "display": "Hematocrit [Volume Fraction] of Blood by Automated count",
+      "category": "laboratory",
+      "value": 35.86,
+      "unit": "%",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "6690-2",
+      "display": "Leukocytes [#/volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 9.3353,
+      "unit": "10*3/uL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "718-7",
+      "display": "Hemoglobin [Mass/volume] in Blood",
+      "category": "laboratory",
+      "value": 13.446,
+      "unit": "g/dL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "72514-3",
+      "display": "Pain severity - 0-10 verbal numeric rating [Score] - Reported",
+      "category": "vital-signs",
+      "value": 3,
+      "unit": "{score}",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "777-3",
+      "display": "Platelets [#/volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 444.64,
+      "unit": "10*3/uL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "785-6",
+      "display": "MCH [Entitic mass] by Automated count",
+      "category": "laboratory",
+      "value": 30.5,
+      "unit": "pg",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "786-4",
+      "display": "MCHC [Entitic Mass/volume] in Red Blood Cells by Automated count",
+      "category": "laboratory",
+      "value": 35.791,
+      "unit": "g/dL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "787-2",
+      "display": "MCV [Entitic mean volume] in Red Blood Cells by Automated count",
+      "category": "laboratory",
+      "value": 92.603,
+      "unit": "fL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "788-0",
+      "display": "Erythrocyte [DistWidth] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 40.353,
+      "unit": "fL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "789-8",
+      "display": "Erythrocytes [#/volume] in Blood by Automated count",
+      "category": "laboratory",
+      "value": 3.9424,
+      "unit": "10*6/uL",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "8302-2",
+      "display": "Body Height",
+      "category": "vital-signs",
+      "value": 168.3,
+      "unit": "cm",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "8310-5",
+      "display": "Body temperature",
+      "category": "vital-signs",
+      "value": 37.979,
+      "unit": "Cel",
+      "effectiveDate": "2024-10-02"
+    },
+    {
+      "code": "8462-4",
+      "display": "Diastolic Blood Pressure",
+      "category": "vital-signs",
+      "value": 89,
+      "unit": "mm[Hg]",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "8480-6",
+      "display": "Systolic Blood Pressure",
+      "category": "vital-signs",
+      "value": 134,
+      "unit": "mm[Hg]",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "8867-4",
+      "display": "Heart rate",
+      "category": "vital-signs",
+      "value": 72,
+      "unit": "/min",
+      "effectiveDate": "2024-03-29"
+    },
+    {
+      "code": "9279-1",
+      "display": "Respiratory rate",
+      "category": "vital-signs",
+      "value": 14,
+      "unit": "/min",
+      "effectiveDate": "2024-03-29"
+    }
+  ]
+}

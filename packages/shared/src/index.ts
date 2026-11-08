@@ -1,14 +1,27 @@
 // Types and helpers shared by the nurse dashboard and the patient app.
+//
+// Privacy (CLAUDE.md): no names, birthdates, addresses or identifiers past the transform step.
+// Key everything on pseudonymous ids; a bed is a display label only, never a key.
 
 export interface Patient {
+  id: string // pseudonymous (Synthea Patient.id)
+  ageBand: string // e.g. "70-79", "90+"
+  gender?: 'male' | 'female' | 'other' | 'unknown'
+  conditions?: string[]
+  medications?: string[]
+}
+
+/** In-progress inpatient stay. `location.display` is the bed label - show it, never key on it. */
+export interface Encounter {
   id: string
-  firstName: string
-  lastName: string
-  room?: string
+  status: 'in-progress'
+  class: 'IMP'
+  location: { id: string; display: string }
 }
 
 export interface VitalsReading {
   patientId: string
+  encounterId?: string
   recordedAt: string // ISO 8601
   heartRateBpm?: number
   systolicMmHg?: number
@@ -23,6 +36,89 @@ export interface VitalsReading {
 /** ACVPU: Alert, new Confusion, responds to Voice, responds to Pain, Unresponsive. */
 export type Consciousness = 'A' | 'C' | 'V' | 'P' | 'U'
 
-export function patientDisplayName(p: Pick<Patient, 'firstName' | 'lastName'>): string {
-  return `${p.firstName} ${p.lastName}`
+// ---------------------------------------------------------------------------------------------
+// Supabase rows (snake_case, see server/supabase/migrations/). Keep in sync with the SQL, or replace with
+// `supabase gen types typescript` output.
+// ---------------------------------------------------------------------------------------------
+
+/** One row per patient holding their LATEST reading (upserted every tick, no history). */
+export interface VitalsRow {
+  patient_id: string // primary key
+  encounter_id: string
+  recorded_at: string
+  heart_rate_bpm: number | null
+  systolic_mmhg: number | null
+  diastolic_mmhg: number | null
+  spo2_percent: number | null
+  temperature_c: number | string | null // Postgres numeric may arrive as a string
+  respiratory_rate: number | null
+  on_oxygen: boolean | null
+  consciousness: Consciousness | null
+}
+
+export type AlertTier = 'watch' | 'check soon' | 'go now'
+
+export interface AlertRow {
+  id: number
+  patient_id: string
+  encounter_id: string
+  created_at: string
+  tier: AlertTier
+  news2_score: number | null
+  reason: string
+  acknowledged_at: string | null
+}
+
+export interface EncounterRow {
+  id: string
+  patient_id: string
+  status: 'in-progress' | 'finished'
+  class: 'IMP'
+  location_id: string
+  bed_label: string
+}
+
+export interface PatientRow {
+  id: string
+  age_band: string
+  gender: Patient['gender'] | null
+  conditions: string[]
+  medications: string[]
+}
+
+const orUndefined = <T>(v: T | null): T | undefined => (v === null ? undefined : v)
+
+export function vitalsFromRow(r: VitalsRow): VitalsReading {
+  return {
+    patientId: r.patient_id,
+    encounterId: r.encounter_id,
+    recordedAt: r.recorded_at,
+    heartRateBpm: orUndefined(r.heart_rate_bpm),
+    systolicMmHg: orUndefined(r.systolic_mmhg),
+    diastolicMmHg: orUndefined(r.diastolic_mmhg),
+    spo2Percent: orUndefined(r.spo2_percent),
+    temperatureC: r.temperature_c === null ? undefined : Number(r.temperature_c),
+    respiratoryRate: orUndefined(r.respiratory_rate),
+    onOxygen: orUndefined(r.on_oxygen),
+    consciousness: orUndefined(r.consciousness),
+  }
+}
+
+export function patientFromRow(r: PatientRow): Patient {
+  return {
+    id: r.id,
+    ageBand: r.age_band,
+    gender: orUndefined(r.gender),
+    conditions: r.conditions,
+    medications: r.medications,
+  }
+}
+
+export function encounterFromRow(r: EncounterRow): Encounter {
+  return { id: r.id, status: 'in-progress', class: r.class, location: { id: r.location_id, display: r.bed_label } }
+}
+
+/** Short non-identifying label, e.g. "4W-02 · 70-79 · 1e7c27a4". */
+export function patientLabel(p: Pick<Patient, 'id' | 'ageBand'>, encounter?: Pick<Encounter, 'location'>): string {
+  return [encounter?.location.display, p.ageBand, p.id.slice(0, 8)].filter(Boolean).join(' · ')
 }
