@@ -16,3 +16,6 @@ release
 .cache
 data/synthea
 __pycache__
+
+# Secrets (Supabase keys)
+.env

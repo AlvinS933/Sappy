@@ -23,6 +23,8 @@
     "data:synthea": "python3 server/Synthea_Gen/synthea.py",
     "sim:demo": "python3 server/sim/cli.py demo",
     "sim:serve": "python3 server/sim/cli.py serve --speed 30",
-    "test:sim": "python3 -m unittest discover server/sim -v"
+    "test:sim": "python3 -m unittest discover server/sim -v",
+    "alerts": "python3 server/news2/alert_worker.py",
+    "test:alerts": "python3 -m unittest server/news2/test_alert_worker.py -v"
   }
 }
