@@ -3,13 +3,24 @@
 //   patient message ─▶ safety check (keywords, instant) ─▶ model ─▶ tool calls? ─▶ run tools ─▶ model ─▶ reply
 //
 // Kept free of Electron imports so it can be tested directly with Node.
-import { createAction, type PatientAction, type Priority } from './actions.ts'
+import {
+  createAction,
+  EMERGENCY_KINDS,
+  ITEM_CATEGORIES,
+  NURSE_REASONS,
+  type EmergencyKind,
+  type ItemCategory,
+  type NurseReason,
+  type PatientAction,
+} from './actions.ts'
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
 export type AgentOptions = {
   ollamaHost: string
   model: string
+  /** Pseudonymous Patient.id this device is assigned to (null if not configured). */
+  patientId: string | null
   /** Called for every action as soon as it's decided (log it, send it to staff, …). */
   onAction: (action: PatientAction) => void
   timeoutMs?: number
@@ -32,7 +43,7 @@ WHAT YOU ARE
 
 TOOLS
 - request_item: the patient wants something brought, like water, food, a blanket, a pillow, or toiletries.
-- call_nurse: the patient needs a person. For example help to the bathroom or out of bed, pain or discomfort, a beeping machine or IV, a medication question, or simply wanting to talk to the nurse.
+- call_nurse: the patient needs a person. For example help to the bathroom or out of bed, pain or discomfort, a beeping machine or IV, a medication question, or simply wanting to talk to the nurse. Anything about the toilet or bathroom is reason "bathroom", even if they also need help walking. Help sitting up, moving in bed, or getting up is reason "mobility". You can't move the patient yourself, so always call the nurse for these.
 - emergency_alert: use immediately for a possible emergency. For example chest pain or pressure, trouble breathing, choking, a fall, stroke signs such as face drooping, arm weakness, or slurred speech, heavy bleeding, a seizure, fainting, sudden severe pain, or talk of harming themselves.
 - Only use a tool when the patient needs it. Do not use tools for small talk or general questions.
 - For everyday conversation, like TV, the weather, family, or how their day is going, just chat and help as best you can yourself. For example, if asked what to watch, suggest a kind of show, like a comedy or a nature documentary. Only offer to involve staff when it's about the patient's care, comfort, or safety.
@@ -56,7 +67,7 @@ const TOOLS = [
         type: 'object',
         properties: {
           item: { type: 'string', description: 'What the patient wants, in a few words, e.g. "water" or "extra blanket".' },
-          category: { type: 'string', enum: ['drink', 'food', 'comfort', 'hygiene', 'other'] },
+          category: { type: 'string', enum: [...ITEM_CATEGORIES] },
           details: { type: 'string', description: 'Anything else the patient said about it, e.g. "with ice". Optional.' },
         },
         required: ['item', 'category'],
@@ -71,12 +82,20 @@ const TOOLS = [
       parameters: {
         type: 'object',
         properties: {
-          reason: { type: 'string', description: 'Short reason for staff, e.g. "help getting to the bathroom".' },
+          reason: {
+            type: 'string',
+            enum: [...NURSE_REASONS],
+            description:
+              'bathroom = help to the bathroom; pain = pain or discomfort; mobility = help moving or getting out of bed; ' +
+              'equipment = a beeping machine, IV or device problem; medication = a question about medicines; ' +
+              'comfort = repositioning or feeling unwell; talk = wants to talk to the nurse; other = anything else.',
+          },
           priority: {
             type: 'string',
             enum: ['routine', 'soon', 'urgent'],
             description: 'routine = when convenient; soon = within a few minutes (e.g. bathroom, pain); urgent = needs attention now but not life-threatening.',
           },
+          details: { type: 'string', description: 'Short note in your own words. Optional.' },
         },
         required: ['reason', 'priority'],
       },
@@ -90,9 +109,14 @@ const TOOLS = [
       parameters: {
         type: 'object',
         properties: {
-          symptoms: { type: 'string', description: 'What the patient described, in their words where possible.' },
+          kind: {
+            type: 'string',
+            enum: [...EMERGENCY_KINDS],
+            description: 'The closest match to what the patient described.',
+          },
+          details: { type: 'string', description: 'Short note in your own words. Optional.' },
         },
-        required: ['symptoms'],
+        required: ['kind'],
       },
     },
   },
@@ -103,23 +127,29 @@ const TOOLS = [
 // the model. Deliberately narrow: "My mom had a heart attack last year" must NOT page staff —
 // too many false alarms and staff start ignoring them. The model judges less clear-cut cases.
 const PAST = /\b(yesterday|last (night|week|month|year)|ago|before i came|years?|months?)\b/i
-const EMERGENCY_PATTERNS: RegExp[] = [
-  /\bmy chest\b.*\b(hurts?|hurting|pain|tight|pressure|heavy)\b/i,
-  /\bi(?: have|'ve got|'m having| am having)? (?:bad |sudden |really bad |severe )?chest (?:pain|pressure|tightness)\b/i,
-  /\b(?:i'?m|i am|i think i'?m) having a (?:heart attack|stroke|seizure)\b/i,
-  /\bi (?:can'?t|cannot|can not) breathe\b/i,
-  /\bi'?m (?:choking|struggling to breathe|having trouble breathing|short of breath)\b/i,
-  /\bi(?: just|'ve just|'ve| have)? (?:fell|fallen|fainted|passed out)\b/i,
-  /\bi(?:'m| am| feel like i'?m| think i'?m)(?: going to| about to| gonna)? (?:pass out|faint|passing out|fainting)\b/i,
-  /\b(?:i'?m bleeding (?:a lot|heavily|badly|everywhere)|won'?t stop bleeding)\b/i,
-  /\bmy (?:face|mouth) (?:is )?(?:drooping|numb)\b/i,
+const EMERGENCY_PATTERNS: [RegExp, EmergencyKind][] = [
+  [/\bmy chest\b.*\b(hurts?|hurting|pain|tight|pressure|heavy)\b/i, 'chest_pain'],
+  [/\bi(?: have|'ve got|'m having| am having)? (?:bad |sudden |really bad |severe )?chest (?:pain|pressure|tightness)\b/i, 'chest_pain'],
+  [/\b(?:i'?m|i am|i think i'?m) having a heart attack\b/i, 'chest_pain'],
+  [/\b(?:i'?m|i am|i think i'?m) having a stroke\b/i, 'stroke_signs'],
+  [/\bmy (?:face|mouth) (?:is )?(?:drooping|numb)\b/i, 'stroke_signs'],
+  [/\b(?:i'?m|i am|i think i'?m) having a seizure\b/i, 'seizure'],
+  [/\bi (?:can'?t|cannot|can not) breathe\b/i, 'breathing'],
+  [/\bi'?m (?:choking|struggling to breathe|having trouble breathing|short of breath)\b/i, 'breathing'],
+  [/\bi(?: just|'ve just|'ve| have)? (?:fell|fallen)\b/i, 'fall'],
+  [/\bi(?: just|'ve just|'ve| have)? (?:fainted|passed out)\b/i, 'fainting'],
+  [/\bi(?:'m| am| feel like i'?m| think i'?m)(?: going to| about to| gonna)? (?:pass out|faint|passing out|fainting)\b/i, 'fainting'],
+  [/\b(?:i'?m bleeding (?:a lot|heavily|badly|everywhere)|won'?t stop bleeding)\b/i, 'bleeding'],
   // Always alert on self-harm language, whatever the tense.
-  /\b(?:kill myself|want to die|end my life|hurt myself|suicid\w*)\b/i,
+  [/\b(?:kill myself|want to die|end my life|hurt myself|suicid\w*)\b/i, 'self_harm'],
 ]
-const ALWAYS = EMERGENCY_PATTERNS.length - 1 // index of the self-harm pattern
 
-export function detectEmergency(text: string): boolean {
-  return EMERGENCY_PATTERNS.some((p, i) => p.test(text) && (i === ALWAYS || !PAST.test(text)))
+/** The kind of emergency described, or null. Past events ("last year") don't count, except self-harm. */
+export function detectEmergency(text: string): EmergencyKind | null {
+  for (const [pattern, kind] of EMERGENCY_PATTERNS) {
+    if (pattern.test(text) && (kind === 'self_harm' || !PAST.test(text))) return kind
+  }
+  return null
 }
 
 // ---------- agent loop ----------
@@ -133,13 +163,17 @@ type OllamaMessage = {
 
 const MAX_TOOL_ROUNDS = 3
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
-const PRIORITIES: Priority[] = ['routine', 'soon', 'urgent']
+const BATHROOM = /\b(bathroom|toilet|restroom|commode|bedpan|pee|poop|wee)\b/i
+
+/** Accept the model's choice only if it's one of the allowed values. */
+const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
+  allowed.includes(v as T) ? (v as T) : fallback
 
 export async function runAgent(history: ChatMessage[], opts: AgentOptions): Promise<AgentResult> {
   const patientMessage = [...history].reverse().find((m) => m.role === 'user')?.content ?? ''
   const actions: PatientAction[] = []
-  const record = (a: Omit<PatientAction, 'id' | 'createdAt' | 'patientMessage'>) => {
-    const action = createAction({ ...a, patientMessage })
+  const record = (spec: Parameters<typeof createAction>[0], source: PatientAction['source'], detail?: string) => {
+    const action = createAction(spec, { patientId: opts.patientId, source, patientMessage, detail })
     actions.push(action)
     opts.onAction(action)
     return action
@@ -149,8 +183,9 @@ export async function runAgent(history: ChatMessage[], opts: AgentOptions): Prom
 
   // 1. Safety net first: alert staff instantly, then tell the model it's done.
   let emergencySent = false
-  if (detectEmergency(patientMessage)) {
-    record({ type: 'emergency', priority: 'emergency', summary: patientMessage, details: { symptoms: patientMessage }, source: 'safety_check' })
+  const detected = detectEmergency(patientMessage)
+  if (detected) {
+    record({ type: 'emergency', category: detected }, 'safety_check')
     emergencySent = true
     messages.push({
       role: 'system',
@@ -162,26 +197,22 @@ export async function runAgent(history: ChatMessage[], opts: AgentOptions): Prom
   const runTool = (name: string, args: Record<string, unknown>): string => {
     switch (name) {
       case 'request_item': {
-        const item = str(args.item) || 'an item'
-        record({
-          type: 'item_request',
-          priority: 'routine',
-          summary: item,
-          details: { item, category: str(args.category) || 'other', ...(str(args.details) && { details: str(args.details) }) },
-          source: 'assistant',
-        })
-        return `Request sent to staff: ${item}. Staff will bring it if it's okay for this patient.`
+        const category = oneOf<ItemCategory>(args.category, ITEM_CATEGORIES, 'other')
+        const action = record({ type: 'item_request', category, item: str(args.item) }, 'assistant', str(args.details) || str(args.item))
+        return `Request sent to staff: ${action.label}. Staff will bring it if it's okay for this patient.`
       }
       case 'call_nurse': {
-        const reason = str(args.reason) || 'patient asked for the nurse'
-        const priority = PRIORITIES.includes(args.priority as Priority) ? (args.priority as Priority) : 'soon'
-        record({ type: 'nurse_call', priority, summary: reason, details: { reason }, source: 'assistant' })
-        return `The nurse has been notified (${priority}): ${reason}.`
+        let category = oneOf<NurseReason>(args.reason, NURSE_REASONS, 'other')
+        // The small model sometimes files bathroom help under "mobility"; staff need to know it's the bathroom.
+        if (BATHROOM.test(patientMessage)) category = 'bathroom'
+        const priority = oneOf(args.priority, ['routine', 'soon', 'urgent'] as const, 'soon')
+        const action = record({ type: 'nurse_call', category, priority }, 'assistant', str(args.details))
+        return `The nurse has been notified (${priority}): ${action.label}.`
       }
       case 'emergency_alert': {
         if (emergencySent) return 'An emergency alert was already sent for this. Staff are on the way.'
-        const symptoms = str(args.symptoms) || patientMessage
-        record({ type: 'emergency', priority: 'emergency', summary: symptoms, details: { symptoms }, source: 'assistant' })
+        const category = oneOf<EmergencyKind>(args.kind, EMERGENCY_KINDS, 'other')
+        record({ type: 'emergency', category }, 'assistant', str(args.details))
         emergencySent = true
         return 'Emergency alert sent. Staff are on the way.'
       }

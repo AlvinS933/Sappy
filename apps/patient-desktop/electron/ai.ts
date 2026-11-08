@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import aiConfig from '../ai.config.json'
 import { dispatchAction, type PatientAction } from './actions'
 import { runAgent, type ChatMessage } from './agent'
+import { getPatientAssignment } from './patient'
 
 const MAX_MESSAGES = 20
 const MAX_CHARS = 8_000
@@ -30,7 +31,7 @@ function sanitize(messages: unknown): ChatMessage[] {
 /** What the page gets back: the spoken reply plus a short summary of any actions taken. */
 export type ChatResponse = {
   reply: string
-  actions: Pick<PatientAction, 'id' | 'type' | 'priority' | 'summary'>[]
+  actions: { id: string; type: PatientAction['type']; priority: PatientAction['priority']; summary: string }[]
 }
 
 export function registerAiHandlers() {
@@ -38,8 +39,13 @@ export function registerAiHandlers() {
     const { reply, actions } = await runAgent(trimHistory(sanitize(messages)), {
       ollamaHost: aiConfig.ollamaHost,
       model: aiConfig.model,
+      patientId: getPatientAssignment().patientId,
       onAction: dispatchAction,
     })
-    return { reply, actions: actions.map(({ id, type, priority, summary }) => ({ id, type, priority, summary })) }
+    // `label` is a fixed, non-free-text label (e.g. "water", "help to the bathroom").
+    return { reply, actions: actions.map(({ id, type, priority, label }) => ({ id, type, priority, summary: label })) }
   })
+
+  // The page shows which patient this device is assigned to (or why it isn't).
+  ipcMain.handle('patient:assignment', () => getPatientAssignment())
 }

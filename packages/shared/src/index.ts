@@ -69,6 +69,14 @@ export interface AlertRow {
   acknowledged_at: string | null
 }
 
+/**
+ * Columns a writer supplies when inserting an alert (`id`, `created_at` and `acknowledged_at`
+ * are filled by the database / the nurse). Used by the NEWS2 worker's alerts and by the patient
+ * app's assistant (item requests, nurse calls, emergencies; `news2_score` is null for those).
+ * `reason` must never contain patient free text.
+ */
+export type NewAlertRow = Pick<AlertRow, 'patient_id' | 'encounter_id' | 'tier' | 'news2_score' | 'reason'>
+
 export interface EncounterRow {
   id: string
   patient_id: string

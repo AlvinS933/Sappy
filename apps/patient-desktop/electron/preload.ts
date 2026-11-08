@@ -1,6 +1,20 @@
 import { ipcRenderer, contextBridge, type IpcRendererEvent } from 'electron'
 
 // Only expose specific, narrow functions to the page — never the raw ipcRenderer.
+// The companion overlay widget: the chat window sets the mood, the widget follows it.
+contextBridge.exposeInMainWorld('companion', {
+  setMood: (mood: string) => ipcRenderer.send('companion:set-mood', mood),
+  getMood: () => ipcRenderer.invoke('companion:get-mood') as Promise<string>,
+  onMood: (cb: (mood: string) => void) => listen('companion:mood', cb),
+})
+
+contextBridge.exposeInMainWorld('patient', {
+  assignment: () =>
+    ipcRenderer.invoke('patient:assignment') as Promise<
+      { patientId: string; warning?: string } | { patientId: null; error: string }
+    >,
+})
+
 contextBridge.exposeInMainWorld('ai', {
   chat: (messages: { role: string; content: string }[]) =>
     ipcRenderer.invoke('ai:chat', messages) as Promise<{

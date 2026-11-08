@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/electron-vite.animate.svg'
 import './App.css'
 import { useSpeech } from './useSpeech'
 import { playChime, useVoiceInput } from './useVoiceInput'
+import type { CompanionMood } from './Companion'
 
 type Msg = { role: 'user' | 'assistant'; content: string; actions?: AiAction[] }
 
@@ -19,6 +18,10 @@ function App() {
   const [input, setInput] = useState<string>('')
   const [messages, setMessages] = useState<Msg[]>([])
   const [loading, setLoading] = useState<boolean>(false)
+  const [assignment, setAssignment] = useState<Awaited<ReturnType<typeof window.patient.assignment>> | null>(null)
+  useEffect(() => {
+    void window.patient.assignment().then(setAssignment)
+  }, [])
   const [voiceOn, setVoiceOn] = useState(true)
   const { speak, stop, speaking } = useSpeech()
   const voice = useVoiceInput({
@@ -28,6 +31,16 @@ function App() {
       playChime()
     },
   })
+
+  // What the companion character is doing.
+  const mood: CompanionMood =
+    voice.status === 'recording' ? 'listening'
+    : loading || voice.status === 'transcribing' ? 'thinking'
+    : speaking ? 'speaking'
+    : 'idle'
+
+  // The companion overlay (its own window in the screen corner) follows this.
+  useEffect(() => window.companion.setMood(mood), [mood])
 
   // Don't listen for the wake word while the app is thinking or talking (it could hear itself).
   const { setPaused } = voice
@@ -57,15 +70,16 @@ function App() {
   }
   return (
     <>
-      <div>
-        <a href="https://electron-vite.github.io" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
       <h1>Vite + React</h1>
+      {assignment && (
+        <p>
+          <small>
+            {assignment.patientId === null
+              ? `⚠️ No patient assigned: ${assignment.error}`
+              : `Patient ${assignment.patientId.slice(0, 8)}${assignment.warning ? ` ⚠️ ${assignment.warning}` : ''}`}
+          </small>
+        </p>
+      )}
       <div className="card">
         <button onClick={() => setCount((count) => count + 1)}>
           count is {count}

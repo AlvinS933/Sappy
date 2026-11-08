@@ -8,7 +8,7 @@
 // Override the chat model with PATIENT_AI_MODEL=<name> pnpm ai:setup
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -19,11 +19,16 @@ const model = process.env.PATIENT_AI_MODEL || config.model
 const host = process.env.OLLAMA_HOST_URL || config.ollamaHost
 
 const log = (msg) => console.log(`[ai:setup] ${msg}`)
+
+// Errors unwind to the end of the script instead of calling process.exit(): exiting abruptly while
+// ONNX Runtime (loaded by the voice models) is running crashes with "libc++abi: mutex lock failed",
+// which hides the real error message.
+class SetupError extends Error {}
 const fail = (msg) => {
-  console.error(`\n[ai:setup] ${msg}\n`)
-  process.exit(1)
+  throw new SetupError(msg)
 }
 
+async function main() {
 // 1. Is Ollama installed?
 const version = spawnSync('ollama', ['--version'], { encoding: 'utf8' })
 if (version.error) {
@@ -50,6 +55,7 @@ let tempServer = null
 if (!(await isUp())) {
   log('Ollama server is not running, starting it temporarily...')
   tempServer = spawn('ollama', ['serve'], { stdio: 'ignore' })
+  tempServer.unref() // don't keep this script running after setup finishes
   for (let i = 0; i < 40 && !(await isUp()); i++) await new Promise((r) => setTimeout(r, 250))
   if (!(await isUp())) fail('Could not start the Ollama server. Try running `ollama serve` yourself.')
 }
@@ -136,8 +142,9 @@ try {
   fail(`Failed to set up the speech-to-text model: ${err.message}`)
 }
 
-// openWakeWord's pre-trained models are downloaded from its releases. A custom
-// (self-trained) model needs a "url" in ai.config.json, or must be copied into .models.
+// openWakeWord's pre-trained models are downloaded from its releases. Our own trained models are
+// committed in apps/patient-desktop/wakewords/ (small, ~200 KB) and copied into .models.
+// A custom model can also be downloaded from a "url" in ai.config.json.
 function wakeWordUrl({ model, url }) {
   if (url) return url
   const pretrained = ['alexa_v0.1.onnx', 'hey_jarvis_v0.1.onnx', 'hey_mycroft_v0.1.onnx', 'hey_rhasspy_v0.1.onnx']
@@ -159,10 +166,17 @@ for (const [rel, url] of downloads) {
     log(`  ✓ ${rel} (already downloaded)`)
     continue
   }
+  const bundled = path.join(appDir, 'wakewords', path.basename(rel))
+  if (!url && existsSync(bundled)) {
+    mkdirSync(path.dirname(dest), { recursive: true })
+    copyFileSync(bundled, dest)
+    log(`  ✓ ${rel} (copied from apps/patient-desktop/wakewords/)`)
+    continue
+  }
   if (!url) {
     fail(
       `Custom wake word model "${config.wakeWord.model}" not found.\n` +
-        `  Copy your trained model to ${dest}\n` +
+        `  Put the trained model in apps/patient-desktop/wakewords/${config.wakeWord.model} (committed to git)\n` +
         `  or add "url": "<download link>" to wakeWord in ai.config.json.`,
     )
   }
@@ -182,4 +196,12 @@ log('Done. All local AI models are ready.')
 if (tempServer) {
   log('Note: Ollama was started only for this setup. Before `pnpm dev:patient`, run')
   log('      `ollama serve`, open the Ollama app, or `brew services start ollama`.')
+}
+}
+
+try {
+  await main()
+} catch (err) {
+  console.error(err instanceof SetupError ? `\n[ai:setup] ${err.message}\n` : err)
+  process.exitCode = 1 // exit normally (see SetupError above)
 }

@@ -23,6 +23,18 @@ declare namespace NodeJS {
 
 // Used in Renderer process, exposed in `preload.ts`
 interface Window {
+  companion: {
+    /** Chat window: tell the overlay what the assistant is doing. */
+    setMood(mood: CompanionMood): void
+    /** Overlay: current mood (in case it changed before the overlay loaded). */
+    getMood(): Promise<CompanionMood>
+    /** Overlay: called whenever the mood changes. Returns an unsubscribe function. */
+    onMood(cb: (mood: CompanionMood) => void): () => void
+  }
+  patient: {
+    /** Which patient this device is assigned to (PATIENT_ID), or why it isn't. */
+    assignment(): Promise<{ patientId: string; warning?: string } | { patientId: null; error: string }>
+  }
   ai: {
     /** Send the conversation; returns the assistant's reply and any actions it took (item requests, nurse calls, emergencies). */
     chat(messages: { role: 'user' | 'assistant'; content: string }[]): Promise<{ reply: string; actions: AiAction[] }>
@@ -57,6 +69,8 @@ interface Window {
     onEvent(cb: (event: VoiceEvent) => void): () => void
   }
 }
+
+type CompanionMood = 'idle' | 'listening' | 'thinking' | 'speaking'
 
 type AiAction = {
   id: string
