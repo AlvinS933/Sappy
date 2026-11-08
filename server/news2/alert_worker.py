@@ -185,6 +185,7 @@ def main() -> None:
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # supabase's per-request logs (1/s)
     load_dotenv(REPO_ROOT / ".env")
     AlertWorker(make_client()).run(args.interval)
 
