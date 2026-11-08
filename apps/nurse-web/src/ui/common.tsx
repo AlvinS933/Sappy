@@ -1,17 +1,21 @@
 // Small shared UI pieces.
 import type { ReactNode } from 'react'
-import type { AlertRow } from '@repo/shared'
-import { TIER } from '../data/model'
+import { TIER, type WardAlert } from '../data/model'
 
 export function Chip({ tone, children }: { tone: string; children: ReactNode }) {
   return <span className={`chip chip-${tone}`}>{children}</span>
 }
 
 /** "Completed", or the tier (Go now / Check soon / Watch) while the alert is incomplete. */
-export function StatusChip({ alert }: { alert: AlertRow }) {
+export function StatusChip({ alert }: { alert: WardAlert }) {
   if (alert.status === 'completed') return <Chip tone="ok">Completed</Chip>
   const t = TIER[alert.tier]
   return <Chip tone={t.className}>{t.label}</Chip>
+}
+
+/** Where an item came from: the NEWS2 score, or the patient's bedside app. */
+export function SourceTag({ alert }: { alert: WardAlert }) {
+  return <span className={`source-tag source-${alert.origin}`}>{alert.tag}</span>
 }
 
 export function Card({ title, aside, children, className = '' }: { title?: ReactNode; aside?: ReactNode; children: ReactNode; className?: string }) {

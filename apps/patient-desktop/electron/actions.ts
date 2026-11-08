@@ -5,10 +5,12 @@
 // categories below, and the alert `reason` is built only from those. The patient's own words stay
 // in `local` (terminal log on this device) and are never sent anywhere.
 //
-// `dispatchAction` sends each action to Supabase as an `alerts` row (via the database function
-// submit_patient_alert, which also looks up the patient's in-progress encounter), and logs it.
+// `dispatchAction` sends each action to Supabase as a `patient_requests` row (via the database
+// function submit_patient_request, which also looks up the patient's in-progress encounter), and
+// logs it. Patient requests have their own table so the NEWS2 worker (which owns `alerts`) can't
+// change them.
 import { randomUUID } from 'node:crypto'
-import type { AlertTier, NewAlertRow } from '@repo/shared'
+import type { AlertTier, PatientRequestRow } from '@repo/shared'
 
 // ---------- categories the model chooses from ----------
 
@@ -131,28 +133,27 @@ export function alertReason(action: PatientAction): string {
   }
 }
 
-/**
- * The `alerts` row for this action, minus `encounter_id`: the database looks up the patient's
- * current in-progress stay when the row is inserted.
- */
-export function toAlertRow(action: PatientAction): Omit<NewAlertRow, 'encounter_id'> | null {
+/** What gets sent to the database for this action (the database adds encounter, time, status). */
+export type NewPatientRequest = Pick<PatientRequestRow, 'patient_id' | 'kind' | 'category' | 'label' | 'tier' | 'source'>
+
+export function toPatientRequest(action: PatientAction): NewPatientRequest | null {
   if (!action.patientId) return null
-  return { patient_id: action.patientId, tier: alertTier(action), news2_score: null, reason: alertReason(action) }
+  return { patient_id: action.patientId, kind: action.type, category: action.category, label: action.label, tier: alertTier(action), source: action.source }
 }
 
 // ---------- delivery ----------
 
 const ICON = { item_request: '🥤', nurse_call: '🔔', emergency: '🚨' } as const
 
-/** Inserts an alerts row and returns its id (see electron/ai.ts). */
-export type SubmitAlert = (row: Omit<NewAlertRow, 'encounter_id'>) => Promise<number>
+/** Inserts a patient_requests row and returns its id (see electron/ai.ts). */
+export type SubmitRequest = (request: NewPatientRequest) => Promise<number>
 
 /**
- * Deliver an action to staff: insert it into the `alerts` table, and log it.
+ * Deliver an action to staff: insert it into the `patient_requests` table, and log it.
  * Resolves true if the database accepted it, false otherwise (never throws).
  */
-export async function dispatchAction(action: PatientAction, submit: SubmitAlert | null): Promise<boolean> {
-  const row = toAlertRow(action)
+export async function dispatchAction(action: PatientAction, submit: SubmitRequest | null): Promise<boolean> {
+  const row = toPatientRequest(action)
   let result: string
   let delivered = false
   if (!row || !submit) {
@@ -161,7 +162,7 @@ export async function dispatchAction(action: PatientAction, submit: SubmitAlert 
     try {
       const alertId = await submit(row)
       delivered = true
-      result = `sent to alerts (id ${alertId}):\n${JSON.stringify(row, null, 2)}`
+      result = `sent to patient_requests (id ${alertId}):\n${JSON.stringify(row, null, 2)}`
     } catch (err) {
       result = `NOT SENT: database error: ${(err as Error)?.message ?? err}`
     }

@@ -1,8 +1,6 @@
 import { useState } from 'react'
-import type { AlertRow } from '@repo/shared'
 import {
   alertStats,
-  alertTitle,
   bedForAlert,
   duration,
   hourLabel,
@@ -12,6 +10,7 @@ import {
   responseByHour,
   timeOfDay,
   type Ward,
+  type WardAlert,
 } from '../data/model'
 import { Card, Segmented, StatusChip } from '../ui/common'
 import { CompletionDial } from '../ui/CompletionDial'
@@ -29,7 +28,7 @@ export function ActivityPage({ ward, openPatient }: { ward: Ward; openPatient: (
     .filter((a) => (filter === 'completed' ? !isIncomplete(a) : filter === 'incomplete' ? isIncomplete(a) : filter === 'go now' ? a.tier === 'go now' : true))
 
   // Group by clock hour.
-  const groups: { hour: number; alerts: AlertRow[] }[] = []
+  const groups: { hour: number; alerts: WardAlert[] }[] = []
   for (const a of shown) {
     const hour = new Date(a.created_at).getHours()
     const last = groups.at(-1)
@@ -42,7 +41,7 @@ export function ActivityPage({ ward, openPatient }: { ward: Ward; openPatient: (
       <header className="page-header">
         <div>
           <h1>Activity</h1>
-          <p className="subtitle">Alerts from the last 24 hours, plus any still incomplete</p>
+          <p className="subtitle">NEWS2 alerts and patient requests from the last 24 hours, plus any still incomplete</p>
         </div>
       </header>
 
@@ -71,14 +70,14 @@ export function ActivityPage({ ward, openPatient }: { ward: Ward; openPatient: (
                   const bed = bedForAlert(ward, a)
                   const doneIn = a.completed_at ? minutesBetween(a.created_at, a.completed_at) : null
                   return (
-                    <li key={a.id}>
+                    <li key={a.key}>
                       <button className="log-row" onClick={() => openPatient(a.patient_id)}>
                         <span className="log-time">{timeOfDay(a.created_at)}</span>
                         <span className="bed-circle">{bed?.label ?? '—'}</span>
                         <span className="request-main">
-                          <strong>{alertTitle(a)}</strong>
+                          <strong>{a.title}</strong>
                           <small>
-                            {a.news2_score !== null ? `NEWS2 ${a.news2_score} · ` : ''}
+                            {a.tag} · 
                             {doneIn !== null ? `completed ${timeOfDay(a.completed_at!)}` : 'incomplete'}
                           </small>
                         </span>
@@ -104,7 +103,7 @@ export function ActivityPage({ ward, openPatient }: { ward: Ward; openPatient: (
   )
 }
 
-function ResponseChart({ alerts, avg }: { alerts: AlertRow[]; avg: number | null }) {
+function ResponseChart({ alerts, avg }: { alerts: WardAlert[]; avg: number | null }) {
   const hours = responseByHour(alerts)
   const max = Math.max(1, ...hours.map((h) => h.avg))
   return (
@@ -133,7 +132,7 @@ function ResponseChart({ alerts, avg }: { alerts: AlertRow[]; avg: number | null
   )
 }
 
-function AlertsByBed({ ward, alerts, openPatient }: { ward: Ward; alerts: AlertRow[]; openPatient: (id: string) => void }) {
+function AlertsByBed({ ward, alerts, openPatient }: { ward: Ward; alerts: WardAlert[]; openPatient: (id: string) => void }) {
   const counts = ward.beds
     .map((bed) => ({ bed, n: alerts.filter((a) => a.patient_id === bed.patient.id).length }))
     .sort((a, b) => b.n - a.n)

@@ -38,7 +38,7 @@ export default function App() {
 }
 
 function Dashboard({ email }: { email: string }) {
-  const { ward, error, lastUpdate, setStatus } = useWard()
+  const { ward, error, warning, live, lastUpdate, setStatus } = useWard()
   const [page, setPage] = useState<Page>(pageFromHash)
   const [selectedPatient, setSelectedPatient] = useState<string | null>(null)
 
@@ -82,9 +82,15 @@ function Dashboard({ email }: { email: string }) {
             <span className="avatar">{email.slice(0, 2).toUpperCase()}</span>
             <strong title={email}>{email}</strong>
           </div>
-          <p className={`connection ${error ? 'connection-error' : ''}`}>
+          <p className={`connection ${error ? 'connection-error' : live === false ? 'connection-warning' : ''}`}>
             <i className="dot" />
-            {error ? 'Connection problem' : lastUpdate ? `Live · updated ${lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Connecting…'}
+            {error
+              ? 'Connection problem'
+              : live === false
+                ? 'Live updates reconnecting · refreshing every 30 s'
+                : lastUpdate
+                  ? `${live ? 'Live' : 'Connecting'} · updated ${lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                  : 'Connecting…'}
           </p>
           <button className="sign-out" onClick={() => void signOut()}>Sign out</button>
         </div>
@@ -92,6 +98,7 @@ function Dashboard({ email }: { email: string }) {
 
       <main className="content">
         {error && <div className="error-banner">Couldn't load ward data: {error}</div>}
+        {warning && <div className="warning-banner">{warning}</div>}
         {!ward ? (
           !error && <div className="loading">Loading ward…</div>
         ) : page === 'alerts' ? (

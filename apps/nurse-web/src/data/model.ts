@@ -1,9 +1,12 @@
 // View model for the nurse dashboard. Everything here is derived from the Supabase tables
-// (server/supabase/migrations/): patients, encounters, vitals, alerts.
+// (server/supabase/migrations/): patients, encounters, vitals, alerts, patient_requests.
+//
+// NEWS2 `alerts` and the bedside app's `patient_requests` are separate tables (so the NEWS2 worker
+// can't touch patient requests) but are shown together: both become a WardAlert.
 //
 // Privacy (CLAUDE.md): patients are shown by bed + age band + sex + short pseudonymous id. There
 // are no names; alert reasons are NEWS2 explanations, never patient free text.
-import type { AlertRow, AlertTier, Patient, VitalsReading } from '@repo/shared'
+import type { AlertRow, AlertStatus, AlertTier, Patient, PatientRequestRow, VitalsReading } from '@repo/shared'
 
 /** One occupied bed (an in-progress encounter): the patient and their latest vitals. */
 export type Bed = {
@@ -15,8 +18,62 @@ export type Bed = {
 
 export type Ward = {
   beds: Bed[]
-  /** Alerts in scope (see inScope): last 24 hours plus anything still incomplete, oldest first. */
-  alerts: AlertRow[]
+  /** NEWS2 alerts + patient requests in scope (see inScope), oldest first. */
+  alerts: WardAlert[]
+}
+
+/** One item in the nurses' queue: a NEWS2 alert or a patient request, in a common shape. */
+export type WardAlert = {
+  /** Unique across both tables, e.g. "alerts:12" or "patient_requests:5" (ids are per table). */
+  key: string
+  table: 'alerts' | 'patient_requests'
+  id: number
+  patient_id: string
+  encounter_id: string
+  created_at: string
+  tier: AlertTier
+  status: AlertStatus
+  completed_at: string | null
+  origin: 'news2' | 'patient'
+  news2Score: number | null
+  /** Headline, e.g. "Respiratory rate 25/min" or "Help to the bathroom". */
+  title: string
+  /** Full explanation: the NEWS2 breakdown, or how the patient's request came in. */
+  detail: string
+  /** Short tag, e.g. "NEWS2 7" or "Patient request". */
+  tag: string
+}
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+export function fromAlertRow(r: AlertRow): WardAlert {
+  const reasons = r.reason.split('; ').filter(Boolean)
+  return {
+    key: `alerts:${r.id}`, table: 'alerts', id: r.id, patient_id: r.patient_id, encounter_id: r.encounter_id,
+    created_at: r.created_at, tier: r.tier, status: r.status, completed_at: r.completed_at,
+    origin: 'news2', news2Score: r.news2_score,
+    // First NEWS2 reason without its point value, e.g. "Respiratory rate 25/min".
+    title: reasons[0]?.replace(/ \(\+\d+\)$/, '') ?? r.reason,
+    detail: reasons.join(' · '),
+    tag: r.news2_score !== null ? `NEWS2 ${r.news2_score}` : 'NEWS2',
+  }
+}
+
+const REQUEST_TITLE: Record<PatientRequestRow['kind'], (label: string) => string> = {
+  item_request: (l) => `Requested ${l}`,
+  nurse_call: (l) => capitalize(l),
+  emergency: (l) => `Possible emergency: ${l}`,
+}
+
+export function fromRequestRow(r: PatientRequestRow): WardAlert {
+  return {
+    key: `patient_requests:${r.id}`, table: 'patient_requests', id: r.id, patient_id: r.patient_id, encounter_id: r.encounter_id,
+    created_at: r.created_at, tier: r.tier, status: r.status, completed_at: r.completed_at,
+    origin: 'patient', news2Score: null,
+    title: REQUEST_TITLE[r.kind](r.label),
+    detail: r.source === 'safety_check' ? 'Patient request via bedside app · caught by the keyword safety check' : 'Patient request via bedside app',
+    tag: 'Patient request',
+  }
 }
 
 // ---------- tiers (the `alerts.tier` values, NEWS2 clinical response bands) ----------
@@ -27,19 +84,12 @@ export const TIER: Record<AlertTier, { label: string; className: string; rank: n
   watch: { label: 'Watch', className: 'watch', rank: 1 },
 }
 
-export const isIncomplete = (a: AlertRow) => a.status === 'incomplete'
+export const isIncomplete = (a: WardAlert) => a.status === 'incomplete'
 
 /** Most severe first, then whoever has waited longest. */
-export function byPriority(a: AlertRow, b: AlertRow): number {
+export function byPriority(a: WardAlert, b: WardAlert): number {
   return TIER[b.tier].rank - TIER[a.tier].rank || a.created_at.localeCompare(b.created_at)
 }
-
-// ---------- alert wording (from `alerts.reason`, NEWS2 reasons joined with "; ") ----------
-
-export const alertReasons = (a: AlertRow) => a.reason.split('; ').filter(Boolean)
-
-/** Headline: the first NEWS2 reason without its point value, e.g. "Respiratory rate 25/min". */
-export const alertTitle = (a: AlertRow) => alertReasons(a)[0]?.replace(/ \(\+\d+\)$/, '') ?? a.reason
 
 // ---------- patients ----------
 
@@ -52,7 +102,7 @@ export const patientSummary = (p: Patient) => [p.ageBand, SEX_SHORT[p.gender ?? 
 /** Short pseudonymous id, e.g. "5a4445ed" (tells records apart without a name). */
 export const shortId = (p: Patient) => p.id.slice(0, 8)
 
-export const bedForAlert = (ward: Ward, a: AlertRow) => ward.beds.find((b) => b.patient.id === a.patient_id)
+export const bedForAlert = (ward: Ward, a: WardAlert) => ward.beds.find((b) => b.patient.id === a.patient_id)
 
 /** Highest tier among a bed's incomplete alerts, or null if none. */
 export function incompleteTier(ward: Ward, bed: Bed): AlertTier | null {
@@ -68,7 +118,7 @@ export const WINDOW_HOURS = 24
 export const windowStart = (now = new Date()) => new Date(now.getTime() - WINDOW_HOURS * 3600_000)
 
 /** Shown everywhere: created in the last 24 hours, or still incomplete (however old). */
-export const inScope = (a: AlertRow, now = new Date()) => isIncomplete(a) || new Date(a.created_at) >= windowStart(now)
+export const inScope = (a: WardAlert, now = new Date()) => isIncomplete(a) || new Date(a.created_at) >= windowStart(now)
 
 export const minutesBetween = (fromIso: string, to: Date | string) =>
   Math.max(0, (new Date(to).getTime() - new Date(fromIso).getTime()) / 60_000)
@@ -96,7 +146,7 @@ export const hourLabel = (h: number) => `${h % 12 || 12} ${h < 12 ? 'AM' : 'PM'}
 
 // ---------- stats ----------
 
-export function alertStats(alerts: AlertRow[]) {
+export function alertStats(alerts: WardAlert[]) {
   const completed = alerts.filter((a) => a.status === 'completed' && a.completed_at)
   const responseMins = completed.map((a) => minutesBetween(a.created_at, a.completed_at!))
   return {
@@ -109,7 +159,7 @@ export function alertStats(alerts: AlertRow[]) {
 }
 
 /** Average time to complete, grouped by the hour the alert was created. */
-export function responseByHour(alerts: AlertRow[]): { hour: number; avg: number }[] {
+export function responseByHour(alerts: WardAlert[]): { hour: number; avg: number }[] {
   const groups = new Map<number, number[]>()
   for (const a of alerts) {
     if (a.status !== 'completed' || !a.completed_at) continue

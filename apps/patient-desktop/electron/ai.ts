@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import aiConfig from '../ai.config.json'
-import { dispatchAction, type PatientAction, type SubmitAlert } from './actions'
+import { dispatchAction, type PatientAction, type SubmitRequest } from './actions'
 import { runAgent, type ChatMessage } from './agent'
 import { getPatientAssignment, getSupabase } from './patient'
 
@@ -34,11 +34,18 @@ export type ChatResponse = {
   actions: { id: string; type: PatientAction['type']; priority: PatientAction['priority']; summary: string; delivered: boolean }[]
 }
 
-/** Insert an alert through the database function (the only write the publishable key allows). */
-const submitAlert: SubmitAlert = async (row) => {
+/** Insert a patient request through the database function (the only write the publishable key allows). */
+const submitRequest: SubmitRequest = async (r) => {
   const db = getSupabase()
   if (!db) throw new Error('not connected to Supabase')
-  const { data, error } = await db.rpc('submit_patient_alert', { p_patient_id: row.patient_id, p_tier: row.tier, p_reason: row.reason })
+  const { data, error } = await db.rpc('submit_patient_request', {
+    p_patient_id: r.patient_id,
+    p_kind: r.kind,
+    p_category: r.category,
+    p_label: r.label,
+    p_tier: r.tier,
+    p_source: r.source,
+  })
   if (error) throw new Error(error.message)
   return data as number
 }
@@ -50,7 +57,7 @@ export function registerAiHandlers() {
       ollamaHost: aiConfig.ollamaHost,
       model: aiConfig.model,
       patientId,
-      onAction: (action) => dispatchAction(action, patientId ? submitAlert : null),
+      onAction: (action) => dispatchAction(action, patientId ? submitRequest : null),
     })
     // `label` is a fixed, non-free-text label (e.g. "water", "help to the bathroom").
     return {

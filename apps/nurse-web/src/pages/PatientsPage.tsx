@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import type { VitalsReading } from '@repo/shared'
 import {
-  alertReasons,
-  alertTitle,
   byBedLabel,
   byPriority,
   clock,
@@ -122,13 +120,13 @@ function PatientDetail({ ward, bed }: { ward: Ward; bed: Bed }) {
         {history.length === 0 && <p className="empty">{range === 'incomplete' ? 'No incomplete alerts.' : 'No alerts in the last 24 hours.'}</p>}
         <ul className="history-list">
           {history.map((a) => (
-            <li key={a.id}>
+            <li key={a.key}>
               <span className="log-time">{timeOfDay(a.created_at)}</span>
               <i className={`dot dot-${a.status === 'completed' ? 'ok' : TIER[a.tier].className}`} />
               <span className="request-main">
-                <strong>{alertTitle(a)}</strong>
+                <strong>{a.title}</strong>
                 <small>
-                  {[a.news2_score !== null && `NEWS2 ${a.news2_score}`, alertReasons(a).slice(1).join(' · ')].filter(Boolean).join(' · ')}
+                  {a.tag} · {a.detail}
                 </small>
               </span>
               <span className="request-meta">

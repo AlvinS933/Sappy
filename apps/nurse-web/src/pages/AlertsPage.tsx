@@ -1,8 +1,6 @@
 import { useState } from 'react'
-import type { AlertRow, AlertStatus, AlertTier } from '@repo/shared'
+import type { AlertStatus, AlertTier } from '@repo/shared'
 import {
-  alertReasons,
-  alertTitle,
   bedForAlert,
   byPriority,
   clock,
@@ -15,17 +13,17 @@ import {
   shortId,
   TIER,
   type Ward,
+  type WardAlert,
 } from '../data/model'
-import { Card, Segmented, StatusChip } from '../ui/common'
+import { Card, Segmented, SourceTag, StatusChip } from '../ui/common'
 import { CompletionDial } from '../ui/CompletionDial'
-import { PulseIcon } from '../ui/Icons'
 import { useNow } from '../ui/useNow'
 
 type Filter = 'all' | AlertTier
 
 type Props = {
   ward: Ward
-  setStatus: (id: number, status: AlertStatus) => Promise<void>
+  setStatus: (alert: WardAlert, status: AlertStatus) => Promise<void>
   openPatient: (patientId: string) => void
 }
 
@@ -74,12 +72,12 @@ export function AlertsPage({ ward, setStatus, openPatient }: Props) {
             <ul className="request-list">
               {rest.map((a) => (
                 <AlertRowItem
-                  key={a.id}
+                  key={a.key}
                   alert={a}
                   ward={ward}
                   now={now}
                   onOpen={() => openPatient(a.patient_id)}
-                  onComplete={() => setStatus(a.id, 'completed')}
+                  onComplete={() => setStatus(a, 'completed')}
                 />
               ))}
             </ul>
@@ -93,7 +91,7 @@ export function AlertsPage({ ward, setStatus, openPatient }: Props) {
   )
 }
 
-function FeaturedAlert({ alert, ward, now, setStatus, openPatient }: { alert: AlertRow; ward: Ward; now: Date; setStatus: (id: number, status: AlertStatus) => Promise<void>; openPatient: (id: string) => void }) {
+function FeaturedAlert({ alert, ward, now, setStatus, openPatient }: { alert: WardAlert; ward: Ward; now: Date; setStatus: (alert: WardAlert, status: AlertStatus) => Promise<void>; openPatient: (id: string) => void }) {
   const bed = bedForAlert(ward, alert)
   const tier = TIER[alert.tier]
   const [busy, setBusy] = useState(false)
@@ -103,7 +101,7 @@ function FeaturedAlert({ alert, ward, now, setStatus, openPatient }: { alert: Al
     setBusy(true)
     setError(null)
     try {
-      await setStatus(alert.id, 'completed')
+      await setStatus(alert, 'completed')
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -122,13 +120,9 @@ function FeaturedAlert({ alert, ward, now, setStatus, openPatient }: { alert: Al
           {tier.label.toUpperCase()}
           {bed && ` · ${patientSummary(bed.patient)} · ${shortId(bed.patient)}`}
         </p>
-        <h2>{alertTitle(alert)}</h2>
-        <p className="featured-detail">{alertReasons(alert).join(' · ')}</p>
-        {alert.news2_score !== null && (
-          <span className="source-tag">
-            <PulseIcon /> NEWS2 score {alert.news2_score}
-          </span>
-        )}
+        <h2>{alert.title}</h2>
+        <p className="featured-detail">{alert.detail}</p>
+        <SourceTag alert={alert} />
       </div>
       <div className="featured-wait">
         <span>WAITING</span>
@@ -147,7 +141,7 @@ function FeaturedAlert({ alert, ward, now, setStatus, openPatient }: { alert: Al
   )
 }
 
-function AlertRowItem({ alert, ward, now, onOpen, onComplete }: { alert: AlertRow; ward: Ward; now: Date; onOpen: () => void; onComplete: () => Promise<void> }) {
+function AlertRowItem({ alert, ward, now, onOpen, onComplete }: { alert: WardAlert; ward: Ward; now: Date; onOpen: () => void; onComplete: () => Promise<void> }) {
   const bed = bedForAlert(ward, alert)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -168,9 +162,9 @@ function AlertRowItem({ alert, ward, now, onOpen, onComplete }: { alert: AlertRo
       <button className="request-row" onClick={onOpen} title="Open patient">
         <span className="bed-circle">{bed?.label ?? '—'}</span>
         <span className="request-main">
-          <strong>{alertTitle(alert)}</strong>
+          <strong>{alert.title}</strong>
           <small>
-            {[bed && patientSummary(bed.patient), alert.news2_score !== null && `NEWS2 ${alert.news2_score}`].filter(Boolean).join(' · ')}
+            {[bed && patientSummary(bed.patient), alert.tag].filter(Boolean).join(' · ')}
           </small>
         </span>
         <span className="request-meta">
@@ -178,7 +172,7 @@ function AlertRowItem({ alert, ward, now, onOpen, onComplete }: { alert: AlertRo
           <StatusChip alert={alert} />
         </span>
       </button>
-      <button className="btn-complete" onClick={complete} disabled={busy} aria-label={`Mark ${alertTitle(alert)} complete`}>
+      <button className="btn-complete" onClick={complete} disabled={busy} aria-label={`Mark ${alert.title} complete`}>
         {busy ? 'Saving…' : 'Complete'}
       </button>
       {error && <p className="error request-error">{error}</p>}
