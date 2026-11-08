@@ -1,5 +1,6 @@
 # Sappy
-
+Login for use: testuser00@gmail.com
+Password: 123456
 **A privacy-first bedside companion for patients, and a prioritized request dashboard for the nurses who care for them.**
 
 Sappy has two sides:
