@@ -3,7 +3,10 @@ import { ipcRenderer, contextBridge, type IpcRendererEvent } from 'electron'
 // Only expose specific, narrow functions to the page — never the raw ipcRenderer.
 contextBridge.exposeInMainWorld('ai', {
   chat: (messages: { role: string; content: string }[]) =>
-    ipcRenderer.invoke('ai:chat', messages) as Promise<string>,
+    ipcRenderer.invoke('ai:chat', messages) as Promise<{
+      reply: string
+      actions: { id: string; type: string; priority: string; summary: string }[]
+    }>,
 })
 
 type TtsChunk = { id: number; samples: Float32Array; sampleRate: number }

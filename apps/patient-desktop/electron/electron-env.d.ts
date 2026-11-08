@@ -23,7 +23,10 @@ declare namespace NodeJS {
 
 // Used in Renderer process, exposed in `preload.ts`
 interface Window {
-  ai: { chat(messages: { role: 'user' | 'assistant'; content: string }[]): Promise<string> }
+  ai: {
+    /** Send the conversation; returns the assistant's reply and any actions it took (item requests, nurse calls, emergencies). */
+    chat(messages: { role: 'user' | 'assistant'; content: string }[]): Promise<{ reply: string; actions: AiAction[] }>
+  }
   tts: {
     /** Start speaking `text`. Resolves with an id used to match audio chunks. */
     speak(text: string): Promise<number>
@@ -53,6 +56,13 @@ interface Window {
     setPaused(paused: boolean): void
     onEvent(cb: (event: VoiceEvent) => void): () => void
   }
+}
+
+type AiAction = {
+  id: string
+  type: 'item_request' | 'nurse_call' | 'emergency'
+  priority: 'routine' | 'soon' | 'urgent' | 'emergency'
+  summary: string
 }
 
 type VoiceEvent =

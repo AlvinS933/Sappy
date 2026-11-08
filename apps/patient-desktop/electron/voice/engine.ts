@@ -20,7 +20,7 @@ export type EngineOptions = {
   endSilenceMs: number // stop after this much silence following speech
   noSpeechTimeoutMs: number // give up if nothing is said after activation
   maxRecordingMs: number
-  wakePhrase?: string // removed from the start of transcripts ("Hey Jarvis, ...")
+  wakePhrase?: string // removed from the start of transcripts ("Hey Sappy, ...")
 }
 
 const FRAME_MS = (FRAME_SIZE / 16000) * 1000 // 80

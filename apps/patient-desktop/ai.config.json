@@ -12,8 +12,8 @@
     "dtype": "fp32"
   },
   "wakeWord": {
-    "model": "hey_jarvis_v0.1.onnx",
-    "phrase": "Hey Jarvis",
+    "model": "hey_sappy.onnx",
+    "phrase": "Hey Sappy",
     "threshold": 0.5
   }
 }
