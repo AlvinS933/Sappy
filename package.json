@@ -26,6 +26,7 @@
     "sim:serve": "python3 server/sim/cli.py serve --demo",
     "test:sim": "python3 -m unittest discover server/sim -v && python3 -m unittest discover server/Synthea_Gen -v",
     "alerts": "python3 server/news2/alert_worker.py",
-    "test:alerts": "python3 -m unittest server/news2/test_alert_worker.py -v"
+    "test:alerts": "python3 -m unittest server/news2/test_alert_worker.py -v",
+    "wake:test": "node scripts/wake-test.mjs"
   }
 }

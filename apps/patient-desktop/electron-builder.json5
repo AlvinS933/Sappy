@@ -19,7 +19,11 @@
     "target": [
       "dmg"
     ],
-    "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
+    "artifactName": "${productName}-Mac-${version}-Installer.${ext}",
+    // Shown in the macOS permission prompt. Audio is processed on this device only.
+    "extendInfo": {
+      "NSMicrophoneUsageDescription": "The assistant listens so you can talk to it instead of typing. Audio is processed on this device and never recorded or sent anywhere."
+    }
   },
   "win": {
     "target": [

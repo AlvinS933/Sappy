@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // Downloads the local AI models used by the patient app:
 //   - the chat model (via Ollama)
-//   - the text-to-speech voice model (Kokoro, into apps/patient-desktop/.models)
+//   - into apps/patient-desktop/.models:
+//       text-to-speech (Kokoro), speech-to-text (Whisper),
+//       wake word (openWakeWord) and voice activity detection (Silero VAD)
 // Usage: pnpm ai:setup   (run `pnpm install` first)
 // Override the chat model with PATIENT_AI_MODEL=<name> pnpm ai:setup
 
 import { spawn, spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -117,6 +119,63 @@ try {
   log(`Voice test: generated ${secs}s of audio in ${((performance.now() - started) / 1000).toFixed(1)}s`)
 } catch (err) {
   fail(`Failed to set up the voice model: ${err.message}`)
+}
+
+// 6. Speech-to-text (Whisper) — also into .models.
+const stt = config.stt
+log(`Downloading speech-to-text model ${stt.model} (${stt.dtype}) ...`)
+try {
+  const appRequire = createRequire(path.join(appDir, 'package.json'))
+  const { env, pipeline } = appRequire('@huggingface/transformers')
+  env.cacheDir = modelsDir
+  env.allowRemoteModels = true
+  const asr = await pipeline('automatic-speech-recognition', stt.model, { dtype: stt.dtype, device: 'cpu' })
+  await asr(new Float32Array(16000)) // one second of silence, just to check it runs
+  log(`  ✓ ${stt.model}`)
+} catch (err) {
+  fail(`Failed to set up the speech-to-text model: ${err.message}`)
+}
+
+// openWakeWord's pre-trained models are downloaded from its releases. A custom
+// (self-trained) model needs a "url" in ai.config.json, or must be copied into .models.
+function wakeWordUrl({ model, url }) {
+  if (url) return url
+  const pretrained = ['alexa_v0.1.onnx', 'hey_jarvis_v0.1.onnx', 'hey_mycroft_v0.1.onnx', 'hey_rhasspy_v0.1.onnx']
+  return pretrained.includes(model) ? `https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/${model}` : null
+}
+
+// 7. Wake word (openWakeWord) and voice activity detection (Silero VAD).
+//    NOTE: openWakeWord's pre-trained wake word models are CC BY-NC-SA 4.0 (non-commercial).
+const downloads = [
+  ['openwakeword/melspectrogram.onnx', 'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx'],
+  ['openwakeword/embedding_model.onnx', 'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx'],
+  [`openwakeword/${config.wakeWord.model}`, wakeWordUrl(config.wakeWord)],
+  ['silero-vad/silero_vad.onnx', 'https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx'],
+]
+log('Downloading wake word and voice activity models ...')
+for (const [rel, url] of downloads) {
+  const dest = path.join(modelsDir, rel)
+  if (existsSync(dest)) {
+    log(`  ✓ ${rel} (already downloaded)`)
+    continue
+  }
+  if (!url) {
+    fail(
+      `Custom wake word model "${config.wakeWord.model}" not found.\n` +
+        `  Copy your trained model to ${dest}\n` +
+        `  or add "url": "<download link>" to wakeWord in ai.config.json.`,
+    )
+  }
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    mkdirSync(path.dirname(dest), { recursive: true })
+    writeFileSync(dest, Buffer.from(await res.arrayBuffer()))
+    log(`  ✓ ${rel}`)
+  } catch (err) {
+    // A custom wake word model (trained by you) can't be downloaded — copy it into .models/openwakeword/.
+    fail(`Failed to download ${rel} from ${url}: ${err.message}`)
+  }
 }
 
 log('Done. All local AI models are ready.')

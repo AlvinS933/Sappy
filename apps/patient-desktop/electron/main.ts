@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { registerAiHandlers } from './ai'
 import { registerTtsHandlers } from './tts'
+import { registerVoiceHandlers } from './voice'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -63,5 +64,6 @@ app.on('activate', () => {
 app.whenReady().then(() => {
   registerAiHandlers()
   registerTtsHandlers()
+  registerVoiceHandlers()
   createWindow()
 })
