@@ -80,7 +80,7 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(() => {
-  loadPatientAssignment()
+  void loadPatientAssignment() // looks up this device's patient in the background
   registerAiHandlers()
   registerTtsHandlers()
   registerVoiceHandlers()

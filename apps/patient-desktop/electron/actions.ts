@@ -5,8 +5,8 @@
 // categories below, and the alert `reason` is built only from those. The patient's own words stay
 // in `local` (terminal log on this device) and are never sent anywhere.
 //
-// For now actions are only logged. Later, `dispatchAction` is the one place to change to insert the
-// row into Supabase (after looking up the patient's in-progress encounter).
+// `dispatchAction` sends each action to Supabase as an `alerts` row (via the database function
+// submit_patient_alert, which also looks up the patient's in-progress encounter), and logs it.
 import { randomUUID } from 'node:crypto'
 import type { AlertTier, NewAlertRow } from '@repo/shared'
 
@@ -58,7 +58,7 @@ const NAMED_ITEMS = [
 
 type Base = {
   id: string
-  /** Pseudonymous Patient.id this device is assigned to (null if PATIENT_ID isn't set). */
+  /** Pseudonymous Patient.id this device plays (null if it has no patient). */
   patientId: string | null
   /** Short label for the patient's screen and staff, e.g. "water" or "help to the bathroom". Never free text. */
   label: string
@@ -132,8 +132,8 @@ export function alertReason(action: PatientAction): string {
 }
 
 /**
- * The `alerts` row for this action, minus `encounter_id`: that's the patient's current in-progress
- * stay, which will be looked up from Supabase (`encounters`) when the row is actually inserted.
+ * The `alerts` row for this action, minus `encounter_id`: the database looks up the patient's
+ * current in-progress stay when the row is inserted.
  */
 export function toAlertRow(action: PatientAction): Omit<NewAlertRow, 'encounter_id'> | null {
   if (!action.patientId) return null
@@ -144,15 +144,32 @@ export function toAlertRow(action: PatientAction): Omit<NewAlertRow, 'encounter_
 
 const ICON = { item_request: '🥤', nurse_call: '🔔', emergency: '🚨' } as const
 
-/** Deliver an action to staff. TODO: insert `toAlertRow(action)` into Supabase instead of logging. */
-export function dispatchAction(action: PatientAction) {
-  const log = action.type === 'emergency' ? console.error : console.log
+/** Inserts an alerts row and returns its id (see electron/ai.ts). */
+export type SubmitAlert = (row: Omit<NewAlertRow, 'encounter_id'>) => Promise<number>
+
+/**
+ * Deliver an action to staff: insert it into the `alerts` table, and log it.
+ * Resolves true if the database accepted it, false otherwise (never throws).
+ */
+export async function dispatchAction(action: PatientAction, submit: SubmitAlert | null): Promise<boolean> {
   const row = toAlertRow(action)
+  let result: string
+  let delivered = false
+  if (!row || !submit) {
+    result = 'NOT SENT: this device has no patient / database connection (see the [patient] message above)'
+  } else {
+    try {
+      const alertId = await submit(row)
+      delivered = true
+      result = `sent to alerts (id ${alertId}):\n${JSON.stringify(row, null, 2)}`
+    } catch (err) {
+      result = `NOT SENT: database error: ${(err as Error)?.message ?? err}`
+    }
+  }
+  const log = action.type === 'emergency' || !delivered ? console.error : console.log
   log(
-    `\n[patient-action] ${ICON[action.type]} [${alertTier(action).toUpperCase()}] ${alertReason(action)}\n` +
-      (row
-        ? `alerts row (encounter_id looked up on insert):\n${JSON.stringify(row, null, 2)}\n`
-        : `NOT SENT: no PATIENT_ID assigned to this device (see apps/patient-desktop/.env.example)\n`) +
+    `\n[patient-action] ${ICON[action.type]} [${alertTier(action).toUpperCase()}] ${alertReason(action)}\n${result}\n` +
       `local only, never sent: ${JSON.stringify({ id: action.id, source: action.source, ...action.local })}\n`,
   )
+  return delivered
 }

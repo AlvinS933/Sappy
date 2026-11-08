@@ -78,7 +78,7 @@ function App() {
           <small>
             {assignment.patientId === null
               ? `⚠️ No patient assigned: ${assignment.error}`
-              : `Patient ${assignment.patientId.slice(0, 8)}${assignment.warning ? ` ⚠️ ${assignment.warning}` : ''}`}
+              : `Patient ${assignment.patientId.slice(0, 8)} · bed ${assignment.bedLabel}`}
           </small>
         </p>
       )}
@@ -91,7 +91,9 @@ function App() {
             </p>
             {m.actions?.map((a) => (
               <p key={a.id}>
-                <small>{ACTION_LABEL[a.type](a.summary)}</small>
+                <small>
+                  {a.delivered ? ACTION_LABEL[a.type](a.summary) : `⚠️ Couldn't reach the nurses (${a.summary}). Please press your call button.`}
+                </small>
               </p>
             ))}
           </div>

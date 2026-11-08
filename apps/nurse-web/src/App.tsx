@@ -1,122 +1,107 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
+import { useEffect, useState, type ReactNode } from 'react'
+import type { Session } from '@supabase/supabase-js'
 import './App.css'
+import { getSession, onAuthChange, signOut, supabaseConfigured } from './lib/supabase'
+import { isIncomplete } from './data/model'
+import { useWard } from './data/useWard'
+import { BellIcon, HistoryIcon, UsersIcon } from './ui/Icons'
+import { AlertsPage } from './pages/AlertsPage'
+import { PatientsPage } from './pages/PatientsPage'
+import { ActivityPage } from './pages/ActivityPage'
+import { LoginPage } from './pages/LoginPage'
 
-function App() {
-  const [count, setCount] = useState(0)
+type Page = 'alerts' | 'patients' | 'activity'
+const PAGES: Page[] = ['alerts', 'patients', 'activity']
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+// The URL hash keeps the current page across reloads: #/alerts, #/patients, #/activity
+const pageFromHash = (): Page => {
+  const p = window.location.hash.replace(/^#\/?/, '').split('/')[0] as Page
+  return PAGES.includes(p) ? p : 'alerts'
 }
 
-export default App
+export default function App() {
+  const [session, setSession] = useState<Session | null>(null)
+  const [authChecked, setAuthChecked] = useState(!supabaseConfigured)
+
+  useEffect(() => {
+    if (!supabaseConfigured) return
+    void getSession().then((s) => {
+      setSession(s)
+      setAuthChecked(true)
+    })
+    return onAuthChange(setSession)
+  }, [])
+
+  if (!authChecked) return <div className="loading">Loading…</div>
+  if (!session) return <LoginPage />
+  return <Dashboard email={session.user.email ?? 'Signed in'} />
+}
+
+function Dashboard({ email }: { email: string }) {
+  const { ward, error, lastUpdate, setStatus } = useWard()
+  const [page, setPage] = useState<Page>(pageFromHash)
+  const [selectedPatient, setSelectedPatient] = useState<string | null>(null)
+
+  useEffect(() => {
+    const onHash = () => setPage(pageFromHash())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  const go = (p: Page) => {
+    window.location.hash = `/${p}`
+    setPage(p)
+  }
+  const openPatient = (id: string) => {
+    setSelectedPatient(id)
+    go('patients')
+  }
+
+  const incompleteCount = ward?.alerts.filter(isIncomplete).length ?? 0
+  const nav: { page: Page; label: string; icon: ReactNode; badge?: number }[] = [
+    { page: 'alerts', label: 'Alerts', icon: <BellIcon />, badge: incompleteCount },
+    { page: 'patients', label: 'Patients', icon: <UsersIcon /> },
+    { page: 'activity', label: 'Activity', icon: <HistoryIcon /> },
+  ]
+
+  return (
+    <div className="layout">
+      <aside className="sidebar">
+        <div className="brand">SAPPY</div>
+        <nav>
+          {nav.map((n) => (
+            <button key={n.page} className={`nav-item ${page === n.page ? 'active' : ''}`} onClick={() => go(n.page)}>
+              {n.icon}
+              <span>{n.label}</span>
+              {n.badge ? <span className="nav-badge">{n.badge}</span> : null}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-footer">
+          <div className="me">
+            <span className="avatar">{email.slice(0, 2).toUpperCase()}</span>
+            <strong title={email}>{email}</strong>
+          </div>
+          <p className={`connection ${error ? 'connection-error' : ''}`}>
+            <i className="dot" />
+            {error ? 'Connection problem' : lastUpdate ? `Live · updated ${lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Connecting…'}
+          </p>
+          <button className="sign-out" onClick={() => void signOut()}>Sign out</button>
+        </div>
+      </aside>
+
+      <main className="content">
+        {error && <div className="error-banner">Couldn't load ward data: {error}</div>}
+        {!ward ? (
+          !error && <div className="loading">Loading ward…</div>
+        ) : page === 'alerts' ? (
+          <AlertsPage ward={ward} setStatus={setStatus} openPatient={openPatient} />
+        ) : page === 'patients' ? (
+          <PatientsPage ward={ward} selectedId={selectedPatient} select={setSelectedPatient} />
+        ) : (
+          <ActivityPage ward={ward} openPatient={openPatient} />
+        )}
+      </main>
+    </div>
+  )
+}

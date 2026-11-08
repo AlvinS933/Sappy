@@ -58,6 +58,9 @@ export interface VitalsRow {
 
 export type AlertTier = 'watch' | 'check soon' | 'go now'
 
+/** Every alert starts 'incomplete'; staff mark it 'completed'. */
+export type AlertStatus = 'incomplete' | 'completed'
+
 export interface AlertRow {
   id: number
   patient_id: string
@@ -66,12 +69,13 @@ export interface AlertRow {
   tier: AlertTier
   news2_score: number | null
   reason: string
-  acknowledged_at: string | null
+  status: AlertStatus
+  completed_at: string | null // set by the database when status becomes 'completed'
 }
 
 /**
- * Columns a writer supplies when inserting an alert (`id`, `created_at` and `acknowledged_at`
- * are filled by the database / the nurse). Used by the NEWS2 worker's alerts and by the patient
+ * Columns a writer supplies when inserting an alert (`id`, `created_at`, `status` and
+ * `completed_at` are filled by the database). Used by the NEWS2 worker's alerts and by the patient
  * app's assistant (item requests, nurse calls, emergencies; `news2_score` is null for those).
  * `reason` must never contain patient free text.
  */

@@ -1,8 +1,8 @@
 import { ipcMain } from 'electron'
 import aiConfig from '../ai.config.json'
-import { dispatchAction, type PatientAction } from './actions'
+import { dispatchAction, type PatientAction, type SubmitAlert } from './actions'
 import { runAgent, type ChatMessage } from './agent'
-import { getPatientAssignment } from './patient'
+import { getPatientAssignment, getSupabase } from './patient'
 
 const MAX_MESSAGES = 20
 const MAX_CHARS = 8_000
@@ -31,19 +31,32 @@ function sanitize(messages: unknown): ChatMessage[] {
 /** What the page gets back: the spoken reply plus a short summary of any actions taken. */
 export type ChatResponse = {
   reply: string
-  actions: { id: string; type: PatientAction['type']; priority: PatientAction['priority']; summary: string }[]
+  actions: { id: string; type: PatientAction['type']; priority: PatientAction['priority']; summary: string; delivered: boolean }[]
+}
+
+/** Insert an alert through the database function (the only write the publishable key allows). */
+const submitAlert: SubmitAlert = async (row) => {
+  const db = getSupabase()
+  if (!db) throw new Error('not connected to Supabase')
+  const { data, error } = await db.rpc('submit_patient_alert', { p_patient_id: row.patient_id, p_tier: row.tier, p_reason: row.reason })
+  if (error) throw new Error(error.message)
+  return data as number
 }
 
 export function registerAiHandlers() {
   ipcMain.handle('ai:chat', async (_event, messages: unknown): Promise<ChatResponse> => {
+    const { patientId } = await getPatientAssignment()
     const { reply, actions } = await runAgent(trimHistory(sanitize(messages)), {
       ollamaHost: aiConfig.ollamaHost,
       model: aiConfig.model,
-      patientId: getPatientAssignment().patientId,
-      onAction: dispatchAction,
+      patientId,
+      onAction: (action) => dispatchAction(action, patientId ? submitAlert : null),
     })
     // `label` is a fixed, non-free-text label (e.g. "water", "help to the bathroom").
-    return { reply, actions: actions.map(({ id, type, priority, label }) => ({ id, type, priority, summary: label })) }
+    return {
+      reply,
+      actions: actions.map(({ id, type, priority, label, delivered }) => ({ id, type, priority, summary: label, delivered })),
+    }
   })
 
   // The page shows which patient this device is assigned to (or why it isn't).
