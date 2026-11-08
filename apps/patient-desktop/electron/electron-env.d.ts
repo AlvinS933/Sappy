@@ -30,6 +30,10 @@ interface Window {
     getMood(): Promise<CompanionMood>
     /** Overlay: called whenever the mood changes. Returns an unsubscribe function. */
     onMood(cb: (mood: CompanionMood) => void): () => void
+    /** Chat window: the sentence being spoken right now (null = not speaking). */
+    setCaption(text: string | null): void
+    /** Overlay: called when the spoken sentence changes. Returns an unsubscribe function. */
+    onCaption(cb: (text: string | null) => void): () => void
   }
   patient: {
     /** Which patient this device is assigned to (PATIENT_ID), or why it isn't. */
@@ -44,8 +48,8 @@ interface Window {
     speak(text: string): Promise<number>
     /** Stop generating audio for an utterance. */
     cancel(id: number): Promise<void>
-    /** Called once per sentence of generated audio. Returns an unsubscribe function. */
-    onChunk(cb: (chunk: { id: number; samples: Float32Array; sampleRate: number }) => void): () => void
+    /** Called once per sentence of generated audio (`text` is that sentence). Returns an unsubscribe function. */
+    onChunk(cb: (chunk: { id: number; text: string; samples: Float32Array; sampleRate: number }) => void): () => void
     /** Called when an utterance has finished generating. Returns an unsubscribe function. */
     onDone(cb: (done: { id: number }) => void): () => void
   }

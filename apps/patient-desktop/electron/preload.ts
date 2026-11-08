@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('companion', {
   setMood: (mood: string) => ipcRenderer.send('companion:set-mood', mood),
   getMood: () => ipcRenderer.invoke('companion:get-mood') as Promise<string>,
   onMood: (cb: (mood: string) => void) => listen('companion:mood', cb),
+  setCaption: (text: string | null) => ipcRenderer.send('companion:set-caption', text),
+  onCaption: (cb: (text: string | null) => void) => listen('companion:caption', cb),
 })
 
 contextBridge.exposeInMainWorld('patient', {
@@ -23,7 +25,7 @@ contextBridge.exposeInMainWorld('ai', {
     }>,
 })
 
-type TtsChunk = { id: number; samples: Float32Array; sampleRate: number }
+type TtsChunk = { id: number; text: string; samples: Float32Array; sampleRate: number }
 
 // Subscribe to a channel and return an unsubscribe function.
 function listen<T>(channel: string, cb: (payload: T) => void) {

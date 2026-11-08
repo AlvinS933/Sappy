@@ -5,8 +5,10 @@
 // The chat window tells it what the assistant is doing ("mood"), and it plays the matching animation.
 import { BrowserWindow, ipcMain, screen } from 'electron'
 
-const WIDTH = 220
-const HEIGHT = 260
+// The window is larger than the character to leave room for the speech bubble above-right of it.
+// The empty area is transparent and click-through, so it never gets in the way.
+const WIDTH = 460
+const HEIGHT = 440
 const MARGIN = 12 // gap from the screen edges
 
 const MOODS = ['idle', 'listening', 'thinking', 'speaking'] as const
@@ -14,6 +16,7 @@ type Mood = (typeof MOODS)[number]
 
 let widget: BrowserWindow | null = null
 let mood: Mood = 'idle'
+let caption: string | null = null // sentence being spoken (speech bubble)
 
 /** Bottom-left corner of the primary display, above the Dock/taskbar. */
 function position() {
@@ -48,7 +51,10 @@ export function createCompanionWindow(opts: { preload: string; load: (win: Brows
   })
 
   widget.setAlwaysOnTop(true, 'floating')
-  widget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  // Show on every desktop/Space. NOT `visibleOnFullScreen: true`: on macOS that turns the whole app
+  // into a background "UIElement" app with no Dock icon or Cmd-Tab entry, so the chat window
+  // can't be brought back once you click away.
+  widget.setVisibleOnAllWorkspaces(true)
   widget.setIgnoreMouseEvents(true) // click-through
   widget.once('ready-to-show', () => widget?.showInactive()) // appear without stealing focus
   widget.on('closed', () => {
@@ -77,4 +83,10 @@ export function registerCompanionHandlers() {
   })
   // From the widget on startup, in case the mood changed before it loaded.
   ipcMain.handle('companion:get-mood', () => mood)
+
+  // From the chat window: the sentence being spoken right now (null = done).
+  ipcMain.on('companion:set-caption', (_event, value: unknown) => {
+    caption = typeof value === 'string' && value.trim() ? value.trim().slice(0, 500) : null
+    if (widget && !widget.isDestroyed()) widget.webContents.send('companion:caption', caption)
+  })
 }

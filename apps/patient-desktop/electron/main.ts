@@ -71,6 +71,11 @@ app.on('activate', () => {
   // dock icon is clicked and there are no other windows open.
   if (!win) {
     createWindow()
+  } else {
+    // Dock icon clicked: bring the chat window back even if it was minimized or hidden.
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
   }
 })
 

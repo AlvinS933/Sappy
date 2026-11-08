@@ -14,7 +14,6 @@ const ACTION_LABEL: Record<AiAction['type'], (summary: string) => string> = {
 }
 
 function App() {
-  const [count, setCount] = useState(0)
   const [input, setInput] = useState<string>('')
   const [messages, setMessages] = useState<Msg[]>([])
   const [loading, setLoading] = useState<boolean>(false)
@@ -23,8 +22,9 @@ function App() {
     void window.patient.assignment().then(setAssignment)
   }, [])
   const [voiceOn, setVoiceOn] = useState(true)
-  const { speak, stop, speaking } = useSpeech()
+  const { speak, stop, speaking, caption } = useSpeech()
   const voice = useVoiceInput({
+    wakeOnStart: true, // "Say "Hey Sappy" to talk" is on by default
     onTranscript: (text) => void send(text),
     onWake: () => {
       stop()
@@ -41,6 +41,8 @@ function App() {
 
   // The companion overlay (its own window in the screen corner) follows this.
   useEffect(() => window.companion.setMood(mood), [mood])
+  // …and shows what it's saying in a speech bubble.
+  useEffect(() => window.companion.setCaption(caption), [caption])
 
   // Don't listen for the wake word while the app is thinking or talking (it could hear itself).
   const { setPaused } = voice
@@ -70,7 +72,7 @@ function App() {
   }
   return (
     <>
-      <h1>Vite + React</h1>
+      
       {assignment && (
         <p>
           <small>
@@ -81,12 +83,7 @@ function App() {
         </p>
       )}
       <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
+        
         {messages.map((m, i) => (
           <div key={i}>
             <p>
@@ -149,9 +146,7 @@ function App() {
           </p>
         </div>
       </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
+      
     </>
   )
 }

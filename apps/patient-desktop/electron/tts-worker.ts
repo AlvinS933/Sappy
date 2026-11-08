@@ -13,7 +13,7 @@ export type WorkerRequest =
 
 export type WorkerResponse =
   | { type: 'ready' }
-  | { type: 'chunk'; id: number; samples: Float32Array; sampleRate: number }
+  | { type: 'chunk'; id: number; text: string; samples: Float32Array; sampleRate: number }
   | { type: 'done'; id: number }
   | { type: 'error'; id?: number; message: string }
 
@@ -61,10 +61,10 @@ async function speak(id: number, text: string) {
     const splitter = new TextSplitterStream()
     splitter.push(speakable)
     splitter.close()
-    for await (const { audio } of tts.stream(splitter, { voice: config.voice as 'af_heart', speed: config.speed })) {
+    for await (const { text: sentence, audio } of tts.stream(splitter, { voice: config.voice as 'af_heart', speed: config.speed })) {
       if (cancelled.has(id)) break
       const samples = audio.audio as Float32Array
-      post({ type: 'chunk', id, samples, sampleRate: audio.sampling_rate }, [samples.buffer as ArrayBuffer])
+      post({ type: 'chunk', id, text: sentence, samples, sampleRate: audio.sampling_rate }, [samples.buffer as ArrayBuffer])
     }
   } catch (err) {
     post({ type: 'error', id, message: (err as Error)?.message ?? String(err) })

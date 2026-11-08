@@ -26,9 +26,11 @@ type Options = {
   onTranscript: (text: string) => void
   /** Called when the wake word is heard. */
   onWake?: () => void
+  /** Start listening for the wake word as soon as the voice models are loaded. */
+  wakeOnStart?: boolean
 }
 
-export function useVoiceInput({ onTranscript, onWake }: Options) {
+export function useVoiceInput({ onTranscript, onWake, wakeOnStart = false }: Options) {
   const [status, setStatus] = useState<VoiceStatus>('loading')
   const [wakeEnabled, setWakeEnabledState] = useState(false)
   const [micError, setMicError] = useState<string | null>(null)
@@ -140,6 +142,14 @@ export function useVoiceInput({ onTranscript, onWake }: Options) {
 
   /** Ignore the wake word while the app is talking (so it doesn't hear itself). */
   const setPaused = useCallback((paused: boolean) => window.voice.setPaused(paused), [])
+
+  // Turn wake-word listening on once at startup (the patient can still switch it off).
+  const autoStarted = useRef(false)
+  useEffect(() => {
+    if (!wakeOnStart || autoStarted.current || status !== 'idle') return
+    autoStarted.current = true
+    void setWakeEnabled(true)
+  }, [wakeOnStart, status, setWakeEnabled])
 
   return { status, wakeEnabled, setWakeEnabled, toggleRecording, setPaused, micError, wakePhrase }
 }

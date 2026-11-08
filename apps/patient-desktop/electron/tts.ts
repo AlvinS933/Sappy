@@ -27,7 +27,7 @@ export function registerTtsHandlers() {
       if (msg.type === 'done') return finish(msg.id)
       const target = owners.get(msg.id)
       if (target && !target.isDestroyed()) {
-        target.send('tts:chunk', { id: msg.id, samples: msg.samples, sampleRate: msg.sampleRate })
+        target.send('tts:chunk', { id: msg.id, text: msg.text, samples: msg.samples, sampleRate: msg.sampleRate })
       }
     },
     // Anything in progress was lost in the crash; let the page know it's over.
